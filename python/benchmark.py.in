@@ -1,0 +1,32 @@
+import csv
+import os
+
+# location of the executable
+exe_loc = '@BINARY_DIR@/bin/cuda-lbvh.exe'
+
+
+def run(params):
+    os.system(exe_loc + ' ' + params)
+
+
+if __name__ == '__main__':
+    size = 1024
+    samples = 128
+    run(
+        '@SCENE_DIR@/sanmiguel.obj sanmiguel.png ' +
+        str(size) + ' ' + str(size) + ' ' + str(samples) + ' ' +
+        '8.0 1.5 10.5 ' +
+        '9.0 1.5 9.5 ' +
+        '0.0 1.0 0.0')
+    run(
+        '@SCENE_DIR@/sibenik.obj sibenik.png ' +
+        str(size) + ' ' + str(size) + ' ' + str(samples) + ' ' +
+        '-15.5 -2.5 0.0 ' +
+        '-14.5 -2.5 0.0 ' +
+        '0.0 1.0 0.0')
+    run(
+        '@SCENE_DIR@/sponza.obj sponza.png ' +
+        str(size) + ' ' + str(size) + ' ' + str(samples) + ' ' +
+        '800.0 580.0 0.0 ' +
+        '799.0 580.0 0.0 ' +
+        '0.0 1.0 0.0')
