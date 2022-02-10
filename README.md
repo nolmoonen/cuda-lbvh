@@ -1,9 +1,9 @@
 `cuda-lbvh` is a CUDA implementation of a linear bounding volume hierarchy
-(LBVH) as described by Karras (see cite below). The LBVH is designed to allow
-for a very quick build, as the tree can be built in parallel. To demonstrate its
-performance, naive path tracing is performed on three different scenes. Although
-offline rendering of static geometry is not the use case of the LBVH, this
-allows for a simple illustration of its performance.
+(LBVH) as described by Karras (see citation below). The LBVH is designed to
+allow for a very quick build, as the tree can be built in parallel. To
+demonstrate its performance, naive path tracing is performed on three different
+scenes. Although offline rendering of static geometry is not the use case of the
+LBVH, this allows for a simple illustration of its performance.
 
 ## Performance
 
