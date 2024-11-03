@@ -1,6 +1,6 @@
 #pragma once
 
-#include <deps/sutil/vec_math.h>
+#include <sutil/vec_math.h>
 
 struct scene {
     float3 *positions;

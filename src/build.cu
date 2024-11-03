@@ -1,4 +1,4 @@
-#include <deps/sutil/vec_math.h>
+#include <sutil/vec_math.h>
 #include "build.h"
 #include "bvh.h"
 #include "vec_math_helper.h"

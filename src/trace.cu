@@ -2,8 +2,8 @@
 #include <stdio.h>
 #include <vector_functions.h>
 #include <vector_types.h>
-#include <deps/sutil/vec_math.h>
-#include <deps/sutil/random.h>
+#include <sutil/vec_math.h>
+#include <sutil/random.h>
 
 #include "vec_math_helper.h"
 #include "camera.h"
@@ -206,12 +206,12 @@ __forceinline__ __device__ float3 generate_pixel(
 /// terminated.
 __global__ void generate_pixel_regeneration(
         uint size_x, uint size_y, uint sample_count, float *buffer,
-        camera *camera, ulong *idx, bvh bvh)
+        camera *camera, unsigned long long int *idx, bvh bvh)
 {
     const ulong max_count = size_x * size_y * sample_count;
     while (true) {
         // obtain the next index. if is it out of bounds, stop
-        ulong this_idx = atomicAdd(idx, 1);
+        unsigned long long int this_idx = atomicAdd(idx, 1);
         if (this_idx >= max_count) break;
 
         uint sample_idx = this_idx / (size_x * size_y);
@@ -265,9 +265,9 @@ void generate(
     CUDA_CHECK(cudaMemset(d_buffer, 0, buffer_size));
 
     // additionally, allocate a single long int counter
-    ulong *d_idx = nullptr;
-    CUDA_CHECK(cudaMalloc(&d_idx, sizeof(ulong)));
-    CUDA_CHECK(cudaMemset(d_idx, 0, sizeof(ulong)));
+    unsigned long long int *d_idx = nullptr;
+    CUDA_CHECK(cudaMalloc(&d_idx, sizeof(unsigned long long int)));
+    CUDA_CHECK(cudaMemset(d_idx, 0, sizeof(unsigned long long int)));
 
     // launch kernel
     generate_pixel_regeneration<<<1024, 1024>>>(

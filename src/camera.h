@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cuda_runtime.h>
-#include <deps/sutil/vec_math.h>
+#include <sutil/vec_math.h>
 
 /// Camera definition.
 struct camera {

@@ -36,7 +36,7 @@ int read_scene(scene *s, const char *filename)
 {
     FILE *file = fopen(filename, "rb");
     if (!file) {
-        fprintf(stderr, "could not open scene file \"%s\"", filename);
+        fprintf(stderr, "could not open scene file \"%s\"\n", filename);
         return -1;
     }
 
