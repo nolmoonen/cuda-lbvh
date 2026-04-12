@@ -30,6 +30,10 @@ The following third-party dependencies are included:
   are edited by triangulating faces.
 * [CUB](https://nvlabs.github.io/cub/) is used to perform a radix sort.
 
+## Using
+
+Building produces a Python script `benchmark.py`, which is used to produce the performance numbers above. It expects the zipped OBJ files to be unzipped in the `scenes` directory.
+
 ## Resources
 
 See [cuda-sdf](https://github.com/nolmoonen/cuda-sdf) for details on path

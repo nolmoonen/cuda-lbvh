@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2024 Nol Moonen
+# Copyright (c) 2022-2026 Nol Moonen
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -44,9 +44,9 @@ add_executable(cuda-lbvh
     ${SOURCE_DIR}/trace.cu)
 target_link_libraries(cuda-lbvh PUBLIC CUDA::cudart_static stb sutil_7_sdk)
 
-# set the binary and scene directories for the benchmark script
-set(BINARY_DIR "${CMAKE_BINARY_DIR}")
-set(SCENE_DIR "${CMAKE_SOURCE_DIR}/scenes")
-configure_file(
-        ${CMAKE_SOURCE_DIR}/python/benchmark.py.in
-        ${CMAKE_BINARY_DIR}/benchmark/benchmark.py @ONLY)
+# Configure to supply variables.
+configure_file(python/benchmark.py.in python/benchmark.py.in.2)
+# Generate to supply generator expressions.
+file(GENERATE 
+    OUTPUT ${CMAKE_BINARY_DIR}/benchmark/benchmark.py
+    INPUT  ${CMAKE_BINARY_DIR}/python/benchmark.py.in.2)
