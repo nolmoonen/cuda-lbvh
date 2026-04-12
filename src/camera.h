@@ -33,7 +33,7 @@ struct camera {
 
 /// Coordinate frame.
 struct frame {
-    __forceinline__ __device__ frame(const float3 &p_normal)
+    __forceinline__ __device__ frame(const float3& p_normal)
     {
         normal = p_normal;
 
@@ -48,23 +48,24 @@ struct frame {
         }
 
         binormal = normalize(binormal);
-        tangent = cross(binormal, normal);
+        tangent  = cross(binormal, normal);
     }
 
     /// Convert a direction in coordinate frame (0,0,1) to this coordinate frame.
-    __forceinline__ __device__ void inverse_transform(float3 &p) const
-    { p = p.x * tangent + p.y * binormal + p.z * normal; }
+    __forceinline__ __device__ void inverse_transform(float3& p) const
+    {
+        p = p.x * tangent + p.y * binormal + p.z * normal;
+    }
 
     float3 tangent;
     float3 binormal;
     float3 normal;
 };
 
-__forceinline__ __device__ float3 cosine_sample_hemisphere(
-        const float u1, const float u2)
+__forceinline__ __device__ float3 cosine_sample_hemisphere(const float u1, const float u2)
 {
     // uniformly sample disk
-    const float r = sqrtf(u1);
+    const float r   = sqrtf(u1);
     const float phi = 2.f * M_PIf * u2;
     float3 p;
     p.x = r * cosf(phi);

@@ -1,0 +1,18 @@
+# clang-format-18
+AlignAfterOpenBracket: AlwaysBreak
+AlignConsecutiveAssignments: Consecutive
+AlignEscapedNewlines: Left
+AlignTrailingComments: Never
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
+AlwaysBreakTemplateDeclarations: Yes
+BinPackArguments: False
+BinPackParameters: False
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+ColumnLimit: 100
+IndentWidth: 4
+PackConstructorInitializers: NextLine
+PointerAlignment: Left
+PenaltyReturnTypeOnItsOwnLine: 9999
+ReflowComments: False

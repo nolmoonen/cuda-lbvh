@@ -31,10 +31,10 @@
 #pragma GCC diagnostic pop
 #endif
 
-#include "trace.h"
 #include "build.h"
+#include "trace.h"
 
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
     int ret;
     if (argc != 15) {
@@ -42,8 +42,8 @@ int main(int argc, char *argv[])
     }
 
     // read input
-    const char *file_in = argv[1];
-    const char *file_out = argv[2];
+    const char* file_in  = argv[1];
+    const char* file_out = argv[2];
     unsigned int size_x, size_y, sample_count;
     sscanf(argv[3], "%d", &size_x);
     sscanf(argv[4], "%d", &size_y);
@@ -71,7 +71,7 @@ int main(int argc, char *argv[])
     if (ret != 0) return -1;
 
     // generate image
-    uchar *image = (uchar *) malloc(sizeof(char) * 3 * size_x * size_y);
+    uchar* image = (uchar*)malloc(sizeof(char) * 3 * size_x * size_y);
     generate(size_x, size_y, sample_count, image, bvh, origin, target, up);
 
     // write image to file

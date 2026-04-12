@@ -23,13 +23,13 @@
 #include <sutil/vec_math.h>
 
 struct scene {
-    float3 *positions;
+    float3* positions;
     unsigned int position_count;
     float3* normals;
     unsigned int normal_count;
     /// Three consecutive indices define the three points of a triangle.
     /// The two indices are the vertex position and normal.
-    uint2 *indices;
+    uint2* indices;
     unsigned int index_count;
     float3 soffset;
     float3 sextent;
@@ -39,6 +39,6 @@ struct scene {
 /// Calculates the scene minimum and maximum points.
 /// Normals are assumed to be unitized.
 /// Returns 0 on success.
-int read_scene(scene *s, const char *filename);
+int read_scene(scene* s, const char* filename);
 
-void free_scene(scene*s);
+void free_scene(scene* s);

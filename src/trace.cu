@@ -20,21 +20,21 @@
 
 #include <cuda_runtime.h>
 #include <stdio.h>
+#include <sutil/random.h>
+#include <sutil/vec_math.h>
 #include <vector_functions.h>
 #include <vector_types.h>
-#include <sutil/vec_math.h>
-#include <sutil/random.h>
 
-#include "vec_math_helper.h"
-#include "camera.h"
-#include "trace.h"
 #include "bvh.h"
+#include "camera.h"
 #include "cuda_check.h"
+#include "trace.h"
+#include "vec_math_helper.h"
 
 /// Returns true if the ray intersects with the bounding box.
 /// Ray Tracing Gems 2, Chapter 2: Ray Axis-Aligned Bounding Box Intersection
 __forceinline__ __device__ bool hit_aabb(
-        bvh_node *child, const float3 &origin, const float3 &inv_dir, float length)
+    bvh_node* child, const float3& origin, const float3& inv_dir, float length)
 {
     float3 t_lower = (child->min - origin) * inv_dir;
     float3 t_upper = (child->max - origin) * inv_dir;
@@ -48,8 +48,7 @@ __forceinline__ __device__ bool hit_aabb(
 
 /// Returns the length along the ray as well as the barycentric coords (u, v).
 /// https://www.iquilezles.org/www/articles/intersectors/intersectors.htm
-__forceinline__ __device__ float3 get_hit(
-        bvh_node *child, float3 origin, float3 direction, bvh bvh)
+__forceinline__ __device__ float3 get_hit(bvh_node* child, float3 origin, float3 direction, bvh bvh)
 {
     // get triangle position indices
     unsigned int v0_idx = bvh.d_scene.indices[3 * child->object_id + 0].x;
@@ -68,27 +67,27 @@ __forceinline__ __device__ float3 get_hit(
     // winding determines face normal
     float3 n = cross(v1v0, v2v0);
     float3 q = cross(rov0, direction);
-    float d = 1.f / dot(direction, n);
-    float u = d * dot(-q, v2v0);
-    float v = d * dot(q, v1v0);
-    float t = d * dot(-n, rov0);
+    float d  = 1.f / dot(direction, n);
+    float u  = d * dot(-q, v2v0);
+    float v  = d * dot(q, v1v0);
+    float t  = d * dot(-n, rov0);
     if (u < 0.f || v < 0.f || (u + v) > 1.f) t = -1.f;
 
     return make_float3(t, u, v);
 }
 
 /// Returns the hit with the bounding box.
-__forceinline__ __device__ hit traverse(
-        bvh bvh, float3 origin, float3 direction, float tmin, float tmax)
+__forceinline__ __device__ hit
+traverse(bvh bvh, float3 origin, float3 direction, float tmin, float tmax)
 {
     // inverse direction for faster aabb test
     float3 inv_dir = 1.f / direction;
 
     // allocate traversal stack from thread-local memory,
     // and push NULL to indicate that there are no postponed nodes
-    bvh_node *stack[64];
-    bvh_node **stack_ptr = stack;
-    *stack_ptr++ = NULL;
+    bvh_node* stack[64];
+    bvh_node** stack_ptr = stack;
+    *stack_ptr++         = NULL;
 
     // closest hit, u and v
     float3 closest = make_float3(tmax, 0.f, 0.f);
@@ -96,19 +95,19 @@ __forceinline__ __device__ hit traverse(
     unsigned int object_id;
 
     // traverse nodes starting from the root, which is the first internal node
-    bvh_node *curr = bvh.internal_nodes;
+    bvh_node* curr = bvh.internal_nodes;
     do {
         // check each child node for overlap.
-        bvh_node *child_l = curr->child_a;
-        bvh_node *child_r = curr->child_b;
-        bool hit_l = hit_aabb(child_l, origin, inv_dir, tmax);
-        bool hit_r = hit_aabb(child_r, origin, inv_dir, tmax);
+        bvh_node* child_l = curr->child_a;
+        bvh_node* child_r = curr->child_b;
+        bool hit_l        = hit_aabb(child_l, origin, inv_dir, tmax);
+        bool hit_r        = hit_aabb(child_r, origin, inv_dir, tmax);
 
         // query overlaps a leaf node => report collision
         if (hit_l && child_l->is_leaf()) {
             float3 hit = get_hit(child_l, origin, direction, bvh);
             if (hit.x > tmin && hit.x < closest.x) {
-                closest = hit;
+                closest   = hit;
                 object_id = child_l->object_id;
             }
         }
@@ -116,7 +115,7 @@ __forceinline__ __device__ hit traverse(
         if (hit_r && child_r->is_leaf()) {
             float3 hit = get_hit(child_r, origin, direction, bvh);
             if (hit.x > tmin && hit.x < closest.x) {
-                closest = hit;
+                closest   = hit;
                 object_id = child_r->object_id;
             }
         }
@@ -138,7 +137,7 @@ __forceinline__ __device__ hit traverse(
     hit h;
     if (closest.x < tmax) {
         h.hitpoint = origin + closest.x * direction;
-        h.hit = true;
+        h.hit      = true;
 
         // get triangle normal indices
         unsigned int v0_idx = bvh.d_scene.indices[3 * object_id + 0].y;
@@ -151,9 +150,7 @@ __forceinline__ __device__ hit traverse(
         float3 n2 = bvh.d_scene.normals[v2_idx];
 
         // use barycentric coords to interpolate normal
-        h.normal = normalize(
-                n0 * (1.f - closest.y - closest.z) + n1 * closest.y +
-                n2 * closest.z);
+        h.normal = normalize(n0 * (1.f - closest.y - closest.z) + n1 * closest.y + n2 * closest.z);
     } else {
         // no hit
         h.hit = false;
@@ -164,23 +161,28 @@ __forceinline__ __device__ hit traverse(
 
 /// Generates a radiance value for the ith sample of this pixel.
 __forceinline__ __device__ float3 generate_pixel(
-        uint image_idx, uint image_idx_x, uint image_idx_y, uint sample_idx,
-        uint size_x, uint size_y, camera *camera, bvh bvh)
+    uint image_idx,
+    uint image_idx_x,
+    uint image_idx_y,
+    uint sample_idx,
+    uint size_x,
+    uint size_y,
+    camera* camera,
+    bvh bvh)
 {
     // initialize random based on sample index and image index
     uint seed = tea<16>(image_idx, sample_idx);
 
     // generate a ray though the pixel, randomly offset within the pixel
-    float2 jitter = make_float2(rnd(seed), rnd(seed));
-    float2 res = make_float2(size_x, size_y);
-    float2 idx = make_float2(image_idx_x, image_idx_y);
-    float2 d = ((idx + jitter) / res) * 2.f - 1.f; // position on raster
-    float3 ray_origin = camera->origin;
-    float3 ray_direction = normalize(
-            d.x * camera->u + d.y * camera->v + camera->w);
+    float2 jitter        = make_float2(rnd(seed), rnd(seed));
+    float2 res           = make_float2(size_x, size_y);
+    float2 idx           = make_float2(image_idx_x, image_idx_y);
+    float2 d             = ((idx + jitter) / res) * 2.f - 1.f; // position on raster
+    float3 ray_origin    = camera->origin;
+    float3 ray_direction = normalize(d.x * camera->u + d.y * camera->v + camera->w);
 
     float3 throughput = make_float3(1.f);
-    float3 radiance = make_float3(0.f);
+    float3 radiance   = make_float3(0.f);
 
     // keep bounding until the maximum number of bounces is hit,
     // or the ray does not intersect with the sdf
@@ -211,7 +213,7 @@ __forceinline__ __device__ float3 generate_pixel(
         throughput *= diff_color;
 
         // set new origin and generate new direction
-        ray_origin = h.hitpoint;
+        ray_origin  = h.hitpoint;
         float3 w_in = cosine_sample_hemisphere(rnd(seed), rnd(seed));
         frame onb(h.normal);
         onb.inverse_transform(w_in);
@@ -225,8 +227,13 @@ __forceinline__ __device__ float3 generate_pixel(
 /// complete samples one by one, starting new ones when the current one is
 /// terminated.
 __global__ void generate_pixel_regeneration(
-        uint size_x, uint size_y, uint sample_count, float *buffer,
-        camera *camera, unsigned long long int *idx, bvh bvh)
+    uint size_x,
+    uint size_y,
+    uint sample_count,
+    float* buffer,
+    camera* camera,
+    unsigned long long int* idx,
+    bvh bvh)
 {
     const ulong max_count = size_x * size_y * sample_count;
     while (true) {
@@ -234,15 +241,14 @@ __global__ void generate_pixel_regeneration(
         unsigned long long int this_idx = atomicAdd(idx, 1);
         if (this_idx >= max_count) break;
 
-        uint sample_idx = this_idx / (size_x * size_y);
-        uint image_idx = this_idx - sample_idx * size_x * size_y;
+        uint sample_idx  = this_idx / (size_x * size_y);
+        uint image_idx   = this_idx - sample_idx * size_x * size_y;
         uint image_idx_y = image_idx / size_x;
         uint image_idx_x = image_idx - image_idx_y * size_x;
 
         // obtain radiance
         float3 radiance = generate_pixel(
-                image_idx, image_idx_x, image_idx_y, sample_idx,
-                size_x, size_y, camera, bvh);
+            image_idx, image_idx_x, image_idx_y, sample_idx, size_x, size_y, camera, bvh);
 
         // atomically add to buffer
         atomicAdd(&buffer[4 * image_idx + 0], radiance.x / float(sample_count));
@@ -253,11 +259,19 @@ __global__ void generate_pixel_regeneration(
 
 /// Converts a linear radiance value to a sRGB pixel value.
 uchar radiance_to_srgb(float val)
-{ return (uchar) (clamp(powf(val, 1.f / 2.4f), 0.f, 1.f) * 255.f); }
+{
+    return (uchar)(clamp(powf(val, 1.f / 2.4f), 0.f, 1.f) * 255.f);
+}
 
 void generate(
-        uint size_x, uint size_y, uint sample_count, uchar *image,
-        bvh bvh, float3 origin, float3 target, float3 up)
+    uint size_x,
+    uint size_y,
+    uint sample_count,
+    uchar* image,
+    bvh bvh,
+    float3 origin,
+    float3 target,
+    float3 up)
 {
     // events for measuring elapsed time
     cudaEvent_t start, stop;
@@ -269,37 +283,36 @@ void generate(
     float aspect = float(size_x) / float(size_y);
     camera cam;
     cam.origin = origin;
-    cam.w = normalize(target - cam.origin);       // lookat direction
-    cam.u = normalize(cross(cam.w, up)) * aspect; // screen right
-    cam.v = normalize(cross(cam.u, cam.w));       // screen up
+    cam.w      = normalize(target - cam.origin); // lookat direction
+    cam.u      = normalize(cross(cam.w, up)) * aspect; // screen right
+    cam.v      = normalize(cross(cam.u, cam.w)); // screen up
 
     // copy camera parameters to device
-    camera *d_cam = nullptr;
+    camera* d_cam = nullptr;
     CUDA_CHECK(cudaMalloc(&d_cam, sizeof(camera)));
     CUDA_CHECK(cudaMemcpy(d_cam, &cam, sizeof(camera), cudaMemcpyHostToDevice));
 
     // create output buffer on device
-    float *d_buffer = nullptr;
+    float* d_buffer    = nullptr;
     size_t buffer_size = sizeof(float) * 4 * size_x * size_y;
     CUDA_CHECK(cudaMalloc(&d_buffer, buffer_size));
     CUDA_CHECK(cudaMemset(d_buffer, 0, buffer_size));
 
     // additionally, allocate a single long int counter
-    unsigned long long int *d_idx = nullptr;
+    unsigned long long int* d_idx = nullptr;
     CUDA_CHECK(cudaMalloc(&d_idx, sizeof(unsigned long long int)));
     CUDA_CHECK(cudaMemset(d_idx, 0, sizeof(unsigned long long int)));
 
     // launch kernel
     generate_pixel_regeneration<<<1024, 1024>>>(
-            size_x, size_y, sample_count, d_buffer, d_cam, d_idx, bvh);
+        size_x, size_y, sample_count, d_buffer, d_cam, d_idx, bvh);
 
     // when kernel is done, copy buffer back to host
     CUDA_SYNC_CHECK();
     CUDA_CHECK(cudaFree(d_idx));
     CUDA_CHECK(cudaFree(d_cam));
-    float *buffer = (float *) malloc(buffer_size);
-    CUDA_CHECK(cudaMemcpy(
-            buffer, d_buffer, buffer_size, cudaMemcpyDeviceToHost));
+    float* buffer = (float*)malloc(buffer_size);
+    CUDA_CHECK(cudaMemcpy(buffer, d_buffer, buffer_size, cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaFree(d_buffer));
 
     // convert buffer to format accepted by image writer

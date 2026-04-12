@@ -18,11 +18,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <stdio.h>
-#include <stdbool.h>
-#include <float.h>
-#include <assert.h>
 #include "obj_reader.h"
+#include <assert.h>
+#include <float.h>
+#include <stdbool.h>
+#include <stdio.h>
 
 #define BUFFER_SIZE 1024
 
@@ -30,8 +30,7 @@
 /// include the null-terminator. String is cut off to be at most BUFFER_SIZE
 /// including null-terminator.
 /// Returns true if this is the last line in the file, false otherwise.
-static bool read_line(
-        FILE *file, char buffer[BUFFER_SIZE], unsigned int *len)
+static bool read_line(FILE* file, char buffer[BUFFER_SIZE], unsigned int* len)
 {
     *len = 0; // index of the next character to put in the buffer.
     int next;
@@ -40,7 +39,7 @@ static bool read_line(
         // if we hit end of file or line, break and do not increment len
         if (next == EOF || next == '\n') break;
         // we find a character, set in buffer and increment len
-        buffer[(*len)++] = (char) next;
+        buffer[(*len)++] = (char)next;
         // if we have no more space for characters, break and let the last
         // character be the null-terminator
         if (*len == BUFFER_SIZE - 1) break;
@@ -52,9 +51,9 @@ static bool read_line(
     return next == EOF;
 }
 
-int read_scene(scene *s, const char *filename)
+int read_scene(scene* s, const char* filename)
 {
-    FILE *file = fopen(filename, "rb");
+    FILE* file = fopen(filename, "rb");
     if (!file) {
         fprintf(stderr, "could not open scene file \"%s\"\n", filename);
         return -1;
@@ -64,8 +63,8 @@ int read_scene(scene *s, const char *filename)
     unsigned int len;
 
     s->position_count = 0;
-    s->normal_count = 0;
-    s->index_count = 0;
+    s->normal_count   = 0;
+    s->index_count    = 0;
 
     // scan for sizes
     while (!read_line(file, buffer, &len)) {
@@ -83,9 +82,9 @@ int read_scene(scene *s, const char *filename)
         }
     }
 
-    s->positions = (float3 *) malloc(sizeof(float3) * s->position_count);
-    s->normals = (float3 *) malloc(sizeof(float3) * s->normal_count);
-    s->indices = (uint2 *) malloc(sizeof(uint2) * s->index_count);
+    s->positions = (float3*)malloc(sizeof(float3) * s->position_count);
+    s->normals   = (float3*)malloc(sizeof(float3) * s->normal_count);
+    s->indices   = (uint2*)malloc(sizeof(uint2) * s->index_count);
 
     float3 smin = make_float3(+FLT_MAX);
     float3 smax = make_float3(-FLT_MAX);
@@ -94,8 +93,8 @@ int read_scene(scene *s, const char *filename)
     fseek(file, 0, SEEK_SET);
 
     unsigned int position_idx = 0;
-    unsigned int normal_idx = 0;
-    unsigned int index_idx = 0;
+    unsigned int normal_idx   = 0;
+    unsigned int index_idx    = 0;
 
     while (!read_line(file, buffer, &len)) {
         if (buffer[0] == 'v') {
@@ -121,8 +120,17 @@ int read_scene(scene *s, const char *filename)
             uint2 i, j, k;
             unsigned int tmp;
             sscanf(
-                    &buffer[2], "%d/%d/%d %d/%d/%d %d/%d/%d",
-                    &i.x, &tmp, &i.y, &j.x, &tmp, &j.y, &k.x, &tmp, &k.y);
+                &buffer[2],
+                "%d/%d/%d %d/%d/%d %d/%d/%d",
+                &i.x,
+                &tmp,
+                &i.y,
+                &j.x,
+                &tmp,
+                &j.y,
+                &k.x,
+                &tmp,
+                &k.y);
 
             s->indices[index_idx++] = i - make_uint2(1u);
             s->indices[index_idx++] = j - make_uint2(1u);
@@ -142,7 +150,7 @@ int read_scene(scene *s, const char *filename)
     return 0;
 }
 
-void free_scene(scene *s)
+void free_scene(scene* s)
 {
     free(s->indices);
     free(s->normals);

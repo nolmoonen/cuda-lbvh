@@ -31,9 +31,9 @@ struct hit {
 
 struct bvh_node {
     /// If nullptr, then this node is a leaf.
-    bvh_node *child_a;
-    bvh_node *child_b;
-    bvh_node *parent;
+    bvh_node* child_a;
+    bvh_node* child_b;
+    bvh_node* parent;
     /** Bounding box. */
     float3 min;
     float3 max;
@@ -46,15 +46,14 @@ struct bvh_node {
     /// The second thread (child) sets it to their union and terminates.
     unsigned int visited;
 
-    __forceinline__ __device__ bool is_leaf() const
-    { return child_a == nullptr; }
+    __forceinline__ __device__ bool is_leaf() const { return child_a == nullptr; }
 };
 
 struct bvh {
     /// Leaf nodes, one for every photon data element.
-    bvh_node *leaf_nodes;
+    bvh_node* leaf_nodes;
     /// Internal nodes, amount equal to #leaf nodes - 1.
-    bvh_node *internal_nodes;
+    bvh_node* internal_nodes;
     /// Scene, but all arrays are allocated on device.
     scene d_scene;
 };
