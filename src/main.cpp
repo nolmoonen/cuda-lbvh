@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 Nol Moonen
+// Copyright (c) 2022-2026 Nol Moonen
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -34,6 +34,13 @@
 #include "build.h"
 #include "trace.h"
 
+// TODO
+// - containers for device allocations
+// - proper error management, release of resources upon fail
+// - separate allocations from cuda event measurement
+// - reduce trace time to something reasonable
+// - improve obj loading performance
+
 int main(int argc, char* argv[])
 {
     int ret;
@@ -45,9 +52,9 @@ int main(int argc, char* argv[])
     const char* file_in  = argv[1];
     const char* file_out = argv[2];
     unsigned int size_x, size_y, sample_count;
-    sscanf(argv[3], "%d", &size_x);
-    sscanf(argv[4], "%d", &size_y);
-    sscanf(argv[5], "%d", &sample_count);
+    sscanf(argv[3], "%u", &size_x);
+    sscanf(argv[4], "%u", &size_y);
+    sscanf(argv[5], "%u", &sample_count);
     float3 origin, target, up;
     sscanf(argv[6], "%f", &origin.x);
     sscanf(argv[7], "%f", &origin.y);

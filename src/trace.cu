@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 Nol Moonen
+// Copyright (c) 2022-2026 Nol Moonen
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -18,18 +18,17 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <cuda_runtime.h>
-#include <stdio.h>
-#include <sutil/random.h>
-#include <sutil/vec_math.h>
-#include <vector_functions.h>
-#include <vector_types.h>
-
 #include "bvh.h"
 #include "camera.h"
 #include "cuda_check.h"
 #include "trace.h"
 #include "vec_math_helper.h"
+
+#include <cuda_runtime.h>
+#include <stdio.h>
+#include <sutil/random.h>
+#include <sutil/vec_math.h>
+#include <vector_functions.h>
 
 /// Returns true if the ray intersects with the bounding box.
 /// Ray Tracing Gems 2, Chapter 2: Ray Axis-Aligned Bounding Box Intersection

@@ -31,8 +31,8 @@ struct scene {
     /// The two indices are the vertex position and normal.
     uint2* indices;
     unsigned int index_count;
-    float3 soffset;
-    float3 sextent;
+    float3 soffset; // Scene offset.
+    float3 sextent; // Scene extent.
 };
 
 /// Only accepts triangle faces defined by v/t/n (so no v//n for example).
