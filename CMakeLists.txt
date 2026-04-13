@@ -38,11 +38,12 @@ add_subdirectory(deps)
 set(SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
 add_executable(cuda-lbvh
     ${SOURCE_DIR}/build.cu
-    ${SOURCE_DIR}/cub_helper.cu
     ${SOURCE_DIR}/main.cpp
     ${SOURCE_DIR}/obj_reader.cpp
     ${SOURCE_DIR}/trace.cu)
 target_link_libraries(cuda-lbvh PUBLIC CUDA::cudart_static stb sutil_7_sdk)
+# TODO ignore deprecation warning for now, find a proper fix
+target_compile_definitions(cuda-lbvh PRIVATE __NV_NO_VECTOR_DEPRECATION_DIAG)
 
 # Configure to supply variables.
 configure_file(python/benchmark.py.in python/benchmark.py.in.2)

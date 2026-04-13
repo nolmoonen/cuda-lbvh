@@ -20,11 +20,11 @@
 
 #include "build.h"
 #include "bvh.h"
-#include "cub_helper.h"
 #include "cuda_check.h"
-#include "util.cuh"
 #include "util.h"
 #include "vec_math_helper.h"
+
+#include <cub/device/device_radix_sort.cuh>
 #include <sutil/vec_math.h>
 
 /// Expands a 10-bit integer into 30 bits by inserting 2 zeros after each bit.
@@ -50,11 +50,11 @@ __forceinline__ __device__ unsigned int morton_3d(float x, float y, float z)
     return xx * 4 + yy * 2 + zz;
 }
 
+// For every triangle, assign a Morton code based on its center.
 __global__ void assign_morton(
     bvh bvh, unsigned int* d_morton, unsigned int* d_ids, unsigned int object_count)
 {
-    unsigned int block_id  = get_block_id();
-    unsigned int thread_id = get_thread_id(block_id);
+    const unsigned int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (thread_id >= object_count) return;
 
     // obtain center of triangle
@@ -81,8 +81,7 @@ __global__ void assign_morton(
 // todo this kernel is pretty small, can it be combined with another?
 __global__ void leaf_nodes(unsigned int* sorted_object_ids, unsigned int num_objects, bvh bvh)
 {
-    unsigned int block_id  = get_block_id();
-    unsigned int thread_id = get_thread_id(block_id);
+    const unsigned int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (thread_id >= num_objects) return;
 
     // no need to set parent to nullptr, each child will have a parent
@@ -181,6 +180,7 @@ __forceinline__ __device__ int find_split(
     return split;
 }
 
+// Build the internal nodes.
 __global__ void internal_nodes(
     unsigned int* sorted_morton_codes,
     unsigned int* sorted_object_ids,
@@ -188,9 +188,8 @@ __global__ void internal_nodes(
     bvh_node* d_leaf_nodes,
     bvh_node* d_internal_nodes)
 {
-    unsigned int block_id  = get_block_id();
-    unsigned int thread_id = get_thread_id(block_id);
-    // notice the -1, we want i in range [0, num_objects - 2]
+    const unsigned int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+    // N.B., we want i in range [0, num_objects - 1) since every thread sets one internal node.
     if (thread_id >= num_objects - 1) return;
 
     // find out which range of objects the node corresponds to
@@ -223,11 +222,11 @@ __global__ void internal_nodes(
     child_b->parent                     = &d_internal_nodes[thread_id];
 }
 
+// Set internal node bounding boxes by traversing the tree from the leaf nodes.
 __global__ void set_aabb(
     unsigned int num_objects, bvh_node* d_leaf_nodes, bvh_node* d_internal_nodes, bvh bvh)
 {
-    unsigned int block_id  = get_block_id();
-    unsigned int thread_id = get_thread_id(block_id);
+    const unsigned int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (thread_id >= num_objects) return;
 
     const unsigned int object_id = d_leaf_nodes[thread_id].object_id;
@@ -262,8 +261,14 @@ __global__ void set_aabb(
         // and hence the sibling bounding box is correct
 
         // set running bounding box to be the union of bounding boxes
-        current_node->min = fminf(current_node->child_a->min, current_node->child_b->min);
-        current_node->max = fmaxf(current_node->child_a->max, current_node->child_b->max);
+        current_node->min = current_node->child_a->min;
+        current_node->max = current_node->child_a->max;
+        if (current_node->child_b != nullptr) {
+            // If the number of nodes is not a power of two, some nodes will not have
+            // a right child.
+            current_node->min = fminf(current_node->min, current_node->child_b->min);
+            current_node->max = fmaxf(current_node->max, current_node->child_b->max);
+        }
 
         // continue traversal
         current_node = current_node->parent;
@@ -311,32 +316,52 @@ int build(scene* s, bvh* bvh)
 
     // allocate array for morton and ids in dimension of triangles
     unsigned int* d_morton = nullptr;
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void**>(&d_morton), sizeof(unsigned int) * triangle_count));
+    CUDA_CHECK(cudaMalloc(&d_morton, sizeof(unsigned int) * triangle_count));
     unsigned int* d_ids = nullptr;
-    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d_ids), sizeof(unsigned int) * triangle_count));
+    CUDA_CHECK(cudaMalloc(&d_ids, sizeof(unsigned int) * triangle_count));
 
     assign_morton<<<block_count, block_size>>>(*bvh, d_morton, d_ids, triangle_count);
     CUDA_SYNC_CHECK();
 
     // sort the key, value pairs according to morton codes
     unsigned int* d_morton_sorted = nullptr;
-    CUDA_CHECK(cudaMalloc(
-        reinterpret_cast<void**>(&d_morton_sorted), sizeof(unsigned int) * triangle_count));
+    CUDA_CHECK(cudaMalloc(&d_morton_sorted, sizeof(unsigned int) * triangle_count));
     unsigned int* d_ids_sorted = nullptr;
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void**>(&d_ids_sorted), sizeof(unsigned int) * triangle_count));
-    // sort is stable (https://groups.google.com/g/cub-users/c/1iXn3sVMEuA)
-    radix_sort(triangle_count, d_morton, d_morton_sorted, d_ids, d_ids_sorted);
+    CUDA_CHECK(cudaMalloc(&d_ids_sorted, sizeof(unsigned int) * triangle_count));
+
+    // Determine temporary device storage requirements.
+    void* d_temp_storage      = nullptr;
+    size_t temp_storage_bytes = 0;
+    cub::DeviceRadixSort::SortPairs(
+        d_temp_storage,
+        temp_storage_bytes,
+        d_morton, // keys_in
+        d_morton_sorted, // keys_out
+        d_ids, // values_in
+        d_ids_sorted, // values_out
+        triangle_count);
+    // Allocate temporary storage
+    CUDA_CHECK(cudaMalloc(&d_temp_storage, temp_storage_bytes));
+    // Run sorting operation, sorting is stable.
+    // https://nvidia.github.io/cccl/unstable/cub/api/structcub_1_1DeviceRadixSort.html
+    cub::DeviceRadixSort::SortPairs(
+        d_temp_storage,
+        temp_storage_bytes,
+        d_morton, // keys_in
+        d_morton_sorted, // keys_out
+        d_ids, // values_in
+        d_ids_sorted, // values_out
+        triangle_count);
+    // free temporary storage
+    CUDA_CHECK(cudaFree(d_temp_storage));
+
     CUDA_SYNC_CHECK();
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(d_ids)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(d_morton)));
+    CUDA_CHECK(cudaFree(d_ids));
+    CUDA_CHECK(cudaFree(d_morton));
 
     // allocate BVH (n leaf nodes, n - 1 internal nodes)
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void**>(&bvh->leaf_nodes), sizeof(bvh_node) * triangle_count));
-    CUDA_CHECK(cudaMalloc(
-        reinterpret_cast<void**>(&bvh->internal_nodes), sizeof(bvh_node) * (triangle_count - 1)));
+    CUDA_CHECK(cudaMalloc(&bvh->leaf_nodes, sizeof(bvh_node) * triangle_count));
+    CUDA_CHECK(cudaMalloc(&bvh->internal_nodes, sizeof(bvh_node) * (triangle_count - 1)));
     // construct leaf nodes
     leaf_nodes<<<block_count, block_size>>>(d_ids_sorted, triangle_count, *bvh);
 
@@ -347,8 +372,8 @@ int build(scene* s, bvh* bvh)
         d_morton_sorted, d_ids_sorted, triangle_count, bvh->leaf_nodes, bvh->internal_nodes);
 
     CUDA_SYNC_CHECK();
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(d_ids_sorted)));
-    CUDA_CHECK(cudaFree(reinterpret_cast<void*>(d_morton_sorted)));
+    CUDA_CHECK(cudaFree(d_ids_sorted));
+    CUDA_CHECK(cudaFree(d_morton_sorted));
 
     // calculate bounding boxes by walking the hierarchy toward the root
     set_aabb<<<block_count, block_size>>>(

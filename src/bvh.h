@@ -30,21 +30,25 @@ struct hit {
 };
 
 struct bvh_node {
-    /// If nullptr, then this node is a leaf.
+    // If `nullptr`, then this node is a leaf.
     bvh_node* child_a;
+    // May be nullptr for inner node if the total number of
+    // nodes is not a power of two.
     bvh_node* child_b;
     bvh_node* parent;
     /** Bounding box. */
     float3 min;
     float3 max;
 
-    /// If leaf, holds the id of the object.
-    unsigned int object_id;
-    /// If internal node, holds whether the node has been visited once
-    /// while setting bounding boxes. The first thread (child) sets
-    /// it equal to its own bounding box and continues up the tree.
-    /// The second thread (child) sets it to their union and terminates.
-    unsigned int visited;
+    union {
+        /// If leaf, holds the id of the object.
+        unsigned int object_id;
+        /// If internal node, holds whether the node has been visited once
+        /// while setting bounding boxes. The first thread (child) sets
+        /// it equal to its own bounding box and continues up the tree.
+        /// The second thread (child) sets it to their union and terminates.
+        unsigned int visited;
+    };
 
     __forceinline__ __device__ bool is_leaf() const { return child_a == nullptr; }
 };

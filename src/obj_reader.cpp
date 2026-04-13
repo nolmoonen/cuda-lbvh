@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 Nol Moonen
+// Copyright (c) 2022-2026 Nol Moonen
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -121,7 +121,7 @@ int read_scene(scene* s, const char* filename)
             unsigned int tmp;
             sscanf(
                 &buffer[2],
-                "%d/%d/%d %d/%d/%d %d/%d/%d",
+                "%u/%u/%u %u/%u/%u %u/%u/%u",
                 &i.x,
                 &tmp,
                 &i.y,
