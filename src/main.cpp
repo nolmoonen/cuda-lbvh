@@ -39,7 +39,6 @@
 // - proper error management, release of resources upon fail
 // - separate allocations from cuda event measurement
 // - reduce trace time to something reasonable
-// - improve obj loading performance
 
 int main(int argc, char* argv[])
 {
@@ -70,7 +69,6 @@ int main(int argc, char* argv[])
     scene s;
     ret = read_scene(&s, file_in);
     if (ret != 0) return -1;
-    printf("loaded %s with %d triangles\n", file_in, s.index_count / 3);
 
     // build bvh
     bvh bvh;
