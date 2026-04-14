@@ -19,64 +19,42 @@
 // SOFTWARE.
 
 #include "obj_reader.h"
-#include <assert.h>
-#include <float.h>
-#include <stdbool.h>
-#include <stdio.h>
 
-#define BUFFER_SIZE 1024
-
-/// Returns a null-terminated string in buffer with a length that does not
-/// include the null-terminator. String is cut off to be at most BUFFER_SIZE
-/// including null-terminator.
-/// Returns true if this is the last line in the file, false otherwise.
-static bool read_line(FILE* file, char buffer[BUFFER_SIZE], unsigned int* len)
-{
-    *len = 0; // index of the next character to put in the buffer.
-    int next;
-    while (true) {
-        next = fgetc(file);
-        // if we hit end of file or line, break and do not increment len
-        if (next == EOF || next == '\n') break;
-        // we find a character, set in buffer and increment len
-        buffer[(*len)++] = (char)next;
-        // if we have no more space for characters, break and let the last
-        // character be the null-terminator
-        if (*len == BUFFER_SIZE - 1) break;
-    }
-
-    // ensure the last character in the line is a terminator
-    buffer[*len] = '\0';
-
-    return next == EOF;
-}
+#include <cassert>
+#include <chrono>
+#include <cstdio>
+#include <fstream>
+#include <limits>
+#include <string>
 
 int read_scene(scene* s, const char* filename)
 {
-    FILE* file = fopen(filename, "rb");
-    if (!file) {
-        fprintf(stderr, "could not open scene file \"%s\"\n", filename);
+    const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+
+    std::fstream stream(filename);
+    if (stream.bad()) {
+        fprintf(stderr, "Could not open scene file \"%s\".\n", filename);
         return -1;
     }
 
-    char buffer[BUFFER_SIZE];
-    unsigned int len;
+    // Read file line by line.
+    std::string line;
 
     s->position_count = 0;
     s->normal_count   = 0;
     s->index_count    = 0;
 
-    // scan for sizes
-    while (!read_line(file, buffer, &len)) {
-        if (buffer[0] == 'v') {
-            if (buffer[1] == ' ') {
-                // vertex position
-                s->position_count++;
-            } else if (buffer[1] == 'n') {
-                // vertex normal
-                s->normal_count++;
-            }
-        } else if (buffer[0] == 'f') {
+    // First pass to scan for sizes.
+    while (std::getline(stream, line)) {
+        if (line.size() < 2) continue;
+
+        if (line[0] == 'v' && line[1] == ' ') {
+            // vertex position
+            s->position_count++;
+        } else if (line[0] == 'v' && line[1] == 'n') {
+            // vertex normal
+            s->normal_count++;
+        } else if (line[0] == 'f') {
             // face, each line defines three pairs of indices
             s->index_count += 3;
         }
@@ -86,41 +64,44 @@ int read_scene(scene* s, const char* filename)
     s->normals   = (float3*)malloc(sizeof(float3) * s->normal_count);
     s->indices   = (uint2*)malloc(sizeof(uint2) * s->index_count);
 
-    float3 smin = make_float3(+FLT_MAX);
-    float3 smax = make_float3(-FLT_MAX);
+    float3 smin = make_float3(+std::numeric_limits<float>::max());
+    float3 smax = make_float3(-std::numeric_limits<float>::max());
 
-    // scan for data
-    fseek(file, 0, SEEK_SET);
+    stream.clear();
+    stream.seekg(0);
 
     unsigned int position_idx = 0;
     unsigned int normal_idx   = 0;
     unsigned int index_idx    = 0;
 
-    while (!read_line(file, buffer, &len)) {
-        if (buffer[0] == 'v') {
-            if (buffer[1] == ' ') {
-                // vertex position
-                float3 v;
-                sscanf(&buffer[2], "%f %f %f", &v.x, &v.y, &v.z);
+    // Second pass to scan for data.
+    while (std::getline(stream, line)) {
+        if (line.size() < 2) continue;
 
-                // note: these points may not necessarily be featured in a face!
-                smin = fminf(smin, v);
-                smax = fmaxf(smax, v);
+        if (line[0] == 'v' && line[1] == ' ') {
+            // vertex position
+            float3 v;
+            sscanf(line.c_str() + 2, "%f %f %f", &v.x, &v.y, &v.z);
 
-                s->positions[position_idx++] = v;
-            } else if (buffer[1] == 'n') {
-                // vertex normal
-                float3 n;
-                sscanf(&buffer[2], "%f %f %f", &n.x, &n.y, &n.z);
+            // TODO these points may not necessarily be featured in a face.
+            // However, finding the bounding box from the list of faces
+            // is more computationally intensive.
+            smin = fminf(smin, v);
+            smax = fmaxf(smax, v);
 
-                s->normals[normal_idx++] = n;
-            }
-        } else if (buffer[0] == 'f') {
+            s->positions[position_idx++] = v;
+        } else if (line[0] == 'v' && line[1] == 'n') {
+            // vertex normal
+            float3 n;
+            sscanf(line.c_str() + 2, "%f %f %f", &n.x, &n.y, &n.z);
+
+            s->normals[normal_idx++] = n;
+        } else if (line[0] == 'f') {
             // face
             uint2 i, j, k;
             unsigned int tmp;
             sscanf(
-                &buffer[2],
+                line.c_str() + 2,
                 "%u/%u/%u %u/%u/%u %u/%u/%u",
                 &i.x,
                 &tmp,
@@ -145,7 +126,10 @@ int read_scene(scene* s, const char* filename)
     s->soffset = smin;
     s->sextent = smax - smin;
 
-    fclose(file);
+    const std::chrono::steady_clock::time_point stop = std::chrono::steady_clock::now();
+    const std::chrono::duration<float> diff          = stop - start;
+
+    printf("loaded %s with %d triangles in %fs\n", filename, s->index_count / 3, diff.count());
 
     return 0;
 }
