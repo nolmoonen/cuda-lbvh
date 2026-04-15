@@ -34,9 +34,6 @@
 #include <cstdio>
 #include <vector>
 
-// TODO
-// - separate allocations from cuda event measurement
-
 bool run(
     const char* file_in,
     const char* file_out,

@@ -292,14 +292,38 @@ bool build(const scene& s, bvh& bvh)
         return false;
     }
 
-    // events for measuring elapsed time
-    cudaEvent_t start, stop;
-    RETURN_IF_CUDA_ERR(cudaEventCreate(&start));
-    RETURN_IF_CUDA_ERR(cudaEventCreate(&stop));
-    RETURN_IF_CUDA_ERR(cudaEventRecord(start));
+    // allocate array for morton and ids in dimension of triangles
+    buf_gpu<unsigned int> d_morton;
+    RETURN_IF_FALSE(d_morton.resize(num_triangles));
+    buf_gpu<unsigned int> d_ids;
+    RETURN_IF_FALSE(d_ids.resize(num_triangles));
 
-    const int block_size = 1024;
-    const int num_blocks = ceiling_div(num_triangles, static_cast<unsigned int>(block_size));
+    // sorted key, value pairs according to morton codes
+    buf_gpu<unsigned int> d_morton_sorted;
+    RETURN_IF_FALSE(d_morton_sorted.resize(num_triangles));
+    buf_gpu<unsigned int> d_ids_sorted;
+    RETURN_IF_FALSE(d_ids_sorted.resize(num_triangles));
+
+    auto sort = [&](void* d_tmp, size_t& tmp_size) {
+        // We don't actually need `keys_out` and `values_in` can be a
+        // counting iterator, but `DeviceRadixSort` needs both as
+        // backing storage.
+        return cub::DeviceRadixSort::SortPairs(
+            d_tmp,
+            tmp_size,
+            d_morton.get_ptr(), // keys_in
+            d_morton_sorted.get_ptr(), // keys_out
+            d_ids.get_ptr(), // values_in
+            d_ids_sorted.get_ptr(), // values_out
+            num_triangles);
+    };
+
+    // Determine temporary device storage requirements.
+    size_t num_tmp_bytes = 0;
+    RETURN_IF_CUDA_ERR(sort(nullptr, num_tmp_bytes));
+    // Allocate temporary storage
+    buf_gpu<char> d_tmp;
+    RETURN_IF_FALSE(d_tmp.resize(num_tmp_bytes));
 
     // copy scene to device
     RETURN_IF_FALSE(bvh.positions.resize(s.positions.get_num_elements()));
@@ -321,11 +345,18 @@ bool build(const scene& s, bvh& bvh)
         sizeof(uint2) * s.indices.get_num_elements(),
         cudaMemcpyHostToDevice));
 
-    // allocate array for morton and ids in dimension of triangles
-    buf_gpu<unsigned int> d_morton;
-    RETURN_IF_FALSE(d_morton.resize(num_triangles));
-    buf_gpu<unsigned int> d_ids;
-    RETURN_IF_FALSE(d_ids.resize(num_triangles));
+    // allocate BVH (n leaf nodes, n - 1 internal nodes)
+    RETURN_IF_FALSE(bvh.leaf_nodes.resize(num_triangles));
+    RETURN_IF_FALSE(bvh.internal_nodes.resize(num_triangles - 1));
+
+    // events for measuring elapsed time
+    cudaEvent_t start, stop;
+    RETURN_IF_CUDA_ERR(cudaEventCreate(&start));
+    RETURN_IF_CUDA_ERR(cudaEventCreate(&stop));
+    RETURN_IF_CUDA_ERR(cudaEventRecord(start));
+
+    const int block_size = 1024;
+    const int num_blocks = ceiling_div(num_triangles, static_cast<unsigned int>(block_size));
 
     assign_morton<<<num_blocks, block_size>>>(
         bvh.positions.get_ptr(),
@@ -337,39 +368,10 @@ bool build(const scene& s, bvh& bvh)
         num_triangles);
     RETURN_IF_CUDA_ERR(cudaGetLastError());
 
-    // sort the key, value pairs according to morton codes
-    buf_gpu<unsigned int> d_morton_sorted;
-    RETURN_IF_FALSE(d_morton_sorted.resize(num_triangles));
-    buf_gpu<unsigned int> d_ids_sorted;
-    RETURN_IF_FALSE(d_ids_sorted.resize(num_triangles));
-
-    // Determine temporary device storage requirements.
-    size_t num_tmp_bytes = 0;
-    RETURN_IF_CUDA_ERR(cub::DeviceRadixSort::SortPairs(
-        nullptr,
-        num_tmp_bytes,
-        d_morton.get_ptr(), // keys_in
-        d_morton_sorted.get_ptr(), // keys_out
-        d_ids.get_ptr(), // values_in
-        d_ids_sorted.get_ptr(), // values_out
-        num_triangles));
-    // Allocate temporary storage
-    buf_gpu<char> d_tmp;
-    RETURN_IF_FALSE(d_tmp.resize(num_tmp_bytes));
     // Run sorting operation, sorting is stable.
     // https://nvidia.github.io/cccl/unstable/cub/api/structcub_1_1DeviceRadixSort.html
-    RETURN_IF_CUDA_ERR(cub::DeviceRadixSort::SortPairs(
-        d_tmp.get_ptr(),
-        num_tmp_bytes,
-        d_morton.get_ptr(), // keys_in
-        d_morton_sorted.get_ptr(), // keys_out
-        d_ids.get_ptr(), // values_in
-        d_ids_sorted.get_ptr(), // values_out
-        num_triangles));
+    RETURN_IF_CUDA_ERR(sort(d_tmp.get_ptr(), num_tmp_bytes));
 
-    // allocate BVH (n leaf nodes, n - 1 internal nodes)
-    RETURN_IF_FALSE(bvh.leaf_nodes.resize(num_triangles));
-    RETURN_IF_FALSE(bvh.internal_nodes.resize(num_triangles - 1));
     // construct leaf nodes
     leaf_nodes<<<num_blocks, block_size>>>(
         d_ids_sorted.get_ptr(),
