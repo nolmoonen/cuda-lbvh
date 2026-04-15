@@ -107,7 +107,8 @@ __forceinline__ __device__ hit traverse(
         bvh_node* child_l = curr->child_a;
         bvh_node* child_r = curr->child_b;
         bool hit_l        = hit_aabb(child_l, origin, inv_dir, tmax);
-        bool hit_r        = hit_aabb(child_r, origin, inv_dir, tmax);
+        // Right child may be null if number of leaves is not a power of two.
+        bool hit_r = child_r != nullptr && hit_aabb(child_r, origin, inv_dir, tmax);
 
         // query overlaps a leaf node => report collision
         if (hit_l && child_l->is_leaf()) {

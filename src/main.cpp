@@ -91,6 +91,11 @@ int main(int argc, char* argv[])
     sscanf(argv[13], "%f", &up.y);
     sscanf(argv[14], "%f", &up.z);
 
+    // TODO
+    // - fix visual glitches. it's not (only) caused by traversing a nullptr
+    // - further improve scene loading performance
+    // - fix color interpretation
+
     if (!run(file_in, file_out, size_x, size_y, sample_count, origin, target, up)) {
         return EXIT_FAILURE;
     }
