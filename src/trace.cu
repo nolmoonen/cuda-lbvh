@@ -311,29 +311,31 @@ bool generate(
     cam.v      = normalize(cross(cam.u, cam.w)); // screen up
 
     // copy camera parameters to device
-    camera* d_cam = nullptr;
-    RETURN_IF_CUDA_ERR(cudaMalloc(&d_cam, sizeof(camera)));
-    RETURN_IF_CUDA_ERR(cudaMemcpy(d_cam, &cam, sizeof(camera), cudaMemcpyHostToDevice));
+    buf_gpu<camera> d_cam;
+    RETURN_IF_FALSE(d_cam.resize(1));
+    RETURN_IF_CUDA_ERR(cudaMemcpy(d_cam.get_ptr(), &cam, sizeof(camera), cudaMemcpyHostToDevice));
+
+    const int num_colors = size_y * size_x * 4;
 
     // create output buffer on device
-    float* d_buffer    = nullptr;
-    size_t buffer_size = sizeof(float) * 4 * size_x * size_y;
-    RETURN_IF_CUDA_ERR(cudaMalloc(&d_buffer, buffer_size));
-    RETURN_IF_CUDA_ERR(cudaMemset(d_buffer, 0, buffer_size));
+    buf_gpu<float> d_buffer;
+    RETURN_IF_FALSE(d_buffer.resize(num_colors));
+    RETURN_IF_CUDA_ERR(
+        cudaMemset(d_buffer.get_ptr(), 0, d_buffer.get_num_elements() * sizeof(float)));
 
     // additionally, allocate a single long int counter
-    unsigned long long int* d_idx = nullptr;
-    RETURN_IF_CUDA_ERR(cudaMalloc(&d_idx, sizeof(unsigned long long int)));
-    RETURN_IF_CUDA_ERR(cudaMemset(d_idx, 0, sizeof(unsigned long long int)));
+    buf_gpu<unsigned long long int> d_idx;
+    RETURN_IF_FALSE(d_idx.resize(1));
+    RETURN_IF_CUDA_ERR(cudaMemset(d_idx.get_ptr(), 0, sizeof(unsigned long long int)));
 
     // launch kernel
     generate_pixel_regeneration<<<1024, 1024>>>(
         size_x,
         size_y,
         sample_count,
-        d_buffer,
-        d_cam,
-        d_idx,
+        d_buffer.get_ptr(),
+        d_cam.get_ptr(),
+        d_idx.get_ptr(),
         bvh.positions.get_ptr(),
         bvh.normals.get_ptr(),
         bvh.indices.get_ptr(),
@@ -341,26 +343,32 @@ bool generate(
     RETURN_IF_CUDA_ERR(cudaGetLastError());
 
     // when kernel is done, copy buffer back to host
-    RETURN_IF_CUDA_ERR(cudaFree(d_idx));
-    RETURN_IF_CUDA_ERR(cudaFree(d_cam));
-    float* buffer = (float*)malloc(buffer_size);
-    RETURN_IF_CUDA_ERR(cudaMemcpy(buffer, d_buffer, buffer_size, cudaMemcpyDeviceToHost));
-    RETURN_IF_CUDA_ERR(cudaFree(d_buffer));
+    buf_cpu<float> h_buffer;
+    RETURN_IF_FALSE(h_buffer.resize(num_colors));
+    RETURN_IF_CUDA_ERR(cudaMemcpy(
+        h_buffer.get_ptr(),
+        d_buffer.get_ptr(),
+        num_colors * sizeof(float),
+        cudaMemcpyDeviceToHost));
 
     // convert buffer to format accepted by image writer
-    for (uint i = 0; i < size_x * size_y; i++) {
-        image[3 * i + 0] = radiance_to_srgb(buffer[4 * i + 0]);
-        image[3 * i + 1] = radiance_to_srgb(buffer[4 * i + 1]);
-        image[3 * i + 2] = radiance_to_srgb(buffer[4 * i + 2]);
+    for (int i = 0; i < size_y * size_x; i++) {
+        image[3 * i + 0] = radiance_to_srgb(h_buffer.get_ptr()[4 * i + 0]);
+        image[3 * i + 1] = radiance_to_srgb(h_buffer.get_ptr()[4 * i + 1]);
+        image[3 * i + 2] = radiance_to_srgb(h_buffer.get_ptr()[4 * i + 2]);
     }
-    free(buffer);
 
     // print elapsed time
     RETURN_IF_CUDA_ERR(cudaEventRecord(stop));
     RETURN_IF_CUDA_ERR(cudaEventSynchronize(stop));
     float milliseconds = 0.f;
     RETURN_IF_CUDA_ERR(cudaEventElapsedTime(&milliseconds, start, stop));
-    printf("tracing took %fs\n", milliseconds * 1e-3f);
+    const float seconds = milliseconds * 1e-3f;
+    const int num_rays  = size_y * size_x * sample_count;
+    printf(
+        " tracing took %5.5fs, %5.2f million rays per second\n",
+        seconds,
+        num_rays / seconds * 1e-6f);
 
     return true;
 }

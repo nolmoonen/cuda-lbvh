@@ -36,7 +36,38 @@
 
 // TODO
 // - separate allocations from cuda event measurement
-// - reduce trace time to something reasonable
+
+bool run(
+    const char* file_in,
+    const char* file_out,
+    unsigned int size_x,
+    unsigned int size_y,
+    unsigned int sample_count,
+    float3 origin,
+    float3 target,
+    float3 up)
+{
+    // parse obj file
+    scene s;
+    RETURN_IF_FALSE(read_scene(s, file_in));
+
+    // build bvh
+    bvh bvh;
+    RETURN_IF_FALSE(build(s, bvh));
+
+    // generate image
+    buf_cpu<uchar> image;
+    RETURN_IF_FALSE(image.resize(size_y * size_x * 3));
+    RETURN_IF_FALSE(
+        generate(size_x, size_y, sample_count, image.get_ptr(), bvh, origin, target, up));
+
+    // write image to file
+    stbi_flip_vertically_on_write(1);
+    stbi_write_png(file_out, size_x, size_y, 3, image.get_ptr(), size_x * 3);
+    printf("generated %s\n", file_out);
+
+    return true;
+}
 
 int main(int argc, char* argv[])
 {
@@ -63,26 +94,7 @@ int main(int argc, char* argv[])
     sscanf(argv[13], "%f", &up.y);
     sscanf(argv[14], "%f", &up.z);
 
-    // parse obj file
-    scene s;
-    if (!read_scene(s, file_in)) {
+    if (!run(file_in, file_out, size_x, size_y, sample_count, origin, target, up)) {
         return EXIT_FAILURE;
     }
-
-    // build bvh
-    bvh bvh;
-    if (!build(s, bvh)) {
-        return EXIT_FAILURE;
-    }
-
-    // generate image
-    std::vector<uchar> image(size_y * size_x * 3);
-    if (!generate(size_x, size_y, sample_count, image.data(), bvh, origin, target, up)) {
-        return EXIT_FAILURE;
-    }
-
-    // write image to file
-    stbi_flip_vertically_on_write(1);
-    stbi_write_png(file_out, size_x, size_y, 3, image.data(), size_x * 3);
-    printf("generated %s\n", file_out);
 }
