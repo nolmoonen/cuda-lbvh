@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 Nol Moonen
+// Copyright (c) 2022-2026 Nol Moonen
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,12 +29,13 @@
 #define MIN_BOUNCE_COUNT 0
 #define MAX_BOUNCE_COUNT 80
 
-void generate(
+// Return `true` on success.
+[[nodiscard]] bool generate(
     uint size_x,
     uint size_y,
     uint sample_count,
     uchar* image,
-    bvh bvh,
+    const bvh& bvh,
     float3 origin,
     float3 target,
     float3 up);

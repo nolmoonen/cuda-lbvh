@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 Nol Moonen
+// Copyright (c) 2022-2026 Nol Moonen
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,7 +20,6 @@
 
 #include "build.h"
 #include "bvh.h"
-#include "cuda_check.h"
 #include "util.h"
 #include "vec_math_helper.h"
 
@@ -52,22 +51,27 @@ __forceinline__ __device__ unsigned int morton_3d(float x, float y, float z)
 
 // For every triangle, assign a Morton code based on its center.
 __global__ void assign_morton(
-    bvh bvh, unsigned int* d_morton, unsigned int* d_ids, unsigned int object_count)
+    const float3* positions,
+    const uint2* indices,
+    float3 scene_offset,
+    float3 scene_extent,
+    unsigned int* d_morton,
+    unsigned int* d_ids,
+    unsigned int object_count)
 {
     const unsigned int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (thread_id >= object_count) return;
 
     // obtain center of triangle
-    unsigned int idx_u = bvh.d_scene.indices[3 * thread_id + 0].x;
-    unsigned int idx_v = bvh.d_scene.indices[3 * thread_id + 1].x;
-    unsigned int idx_w = bvh.d_scene.indices[3 * thread_id + 2].x;
-    float3 pos = (1.f / 3.f) * (bvh.d_scene.positions[idx_u] + bvh.d_scene.positions[idx_v] +
-                                bvh.d_scene.positions[idx_w]);
+    unsigned int idx_u = indices[3 * thread_id + 0].x;
+    unsigned int idx_v = indices[3 * thread_id + 1].x;
+    unsigned int idx_w = indices[3 * thread_id + 2].x;
+    float3 pos         = (1.f / 3.f) * (positions[idx_u] + positions[idx_v] + positions[idx_w]);
 
     // normalize position
-    float x = (pos.x - bvh.d_scene.soffset.x) / bvh.d_scene.sextent.x;
-    float y = (pos.y - bvh.d_scene.soffset.y) / bvh.d_scene.sextent.y;
-    float z = (pos.z - bvh.d_scene.soffset.z) / bvh.d_scene.sextent.z;
+    float x = (pos.x - scene_offset.x) / scene_extent.x;
+    float y = (pos.y - scene_offset.y) / scene_extent.y;
+    float z = (pos.z - scene_offset.z) / scene_extent.z;
     // clamp to deal with numeric issues
     x = fclampf(x, 0.f, 1.f);
     y = fclampf(y, 0.f, 1.f);
@@ -79,20 +83,24 @@ __global__ void assign_morton(
 }
 
 // todo this kernel is pretty small, can it be combined with another?
-__global__ void leaf_nodes(unsigned int* sorted_object_ids, unsigned int num_objects, bvh bvh)
+__global__ void leaf_nodes(
+    unsigned int* sorted_object_ids,
+    unsigned int num_objects,
+    bvh_node* leaf_nodes,
+    bvh_node* internal_nodes)
 {
     const unsigned int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (thread_id >= num_objects) return;
 
     // no need to set parent to nullptr, each child will have a parent
-    bvh.leaf_nodes[thread_id].object_id = sorted_object_ids[thread_id];
+    leaf_nodes[thread_id].object_id = sorted_object_ids[thread_id];
     // needed to recognize that this node is a leaf
-    bvh.leaf_nodes[thread_id].child_a = nullptr;
+    leaf_nodes[thread_id].child_a = nullptr;
 
     // need to set for internal node parent to nullptr, for testing later
     // there is one less internal node than leaf node, test for that
     if (thread_id >= num_objects - 1) return;
-    bvh.internal_nodes[thread_id].parent = nullptr;
+    internal_nodes[thread_id].parent = nullptr;
 }
 
 __forceinline__ __device__ int delta(int a, int b, unsigned int n, unsigned int* c, unsigned int ka)
@@ -224,20 +232,24 @@ __global__ void internal_nodes(
 
 // Set internal node bounding boxes by traversing the tree from the leaf nodes.
 __global__ void set_aabb(
-    unsigned int num_objects, bvh_node* d_leaf_nodes, bvh_node* d_internal_nodes, bvh bvh)
+    unsigned int num_objects,
+    bvh_node* d_leaf_nodes,
+    bvh_node* d_internal_nodes,
+    const float3* positions,
+    const uint2* indices)
 {
     const unsigned int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (thread_id >= num_objects) return;
 
     const unsigned int object_id = d_leaf_nodes[thread_id].object_id;
 
-    unsigned int idx_u = bvh.d_scene.indices[3 * object_id + 0].x;
-    unsigned int idx_v = bvh.d_scene.indices[3 * object_id + 1].x;
-    unsigned int idx_w = bvh.d_scene.indices[3 * object_id + 2].x;
+    unsigned int idx_u = indices[3 * object_id + 0].x;
+    unsigned int idx_v = indices[3 * object_id + 1].x;
+    unsigned int idx_w = indices[3 * object_id + 2].x;
 
-    float3 u = bvh.d_scene.positions[idx_u];
-    float3 v = bvh.d_scene.positions[idx_v];
-    float3 w = bvh.d_scene.positions[idx_w];
+    float3 u = positions[idx_u];
+    float3 v = positions[idx_v];
+    float3 w = positions[idx_w];
 
     // set bounding box of leaf node
     d_leaf_nodes[thread_id].min = fminf(u, fminf(v, w));
@@ -275,131 +287,127 @@ __global__ void set_aabb(
     }
 }
 
-int build(scene* s, bvh* bvh)
+bool build(const scene& s, bvh& bvh)
 {
-    uint triangle_count = s->index_count / 3;
+    uint triangle_count = s.indices.get_num_elements() / 3;
     // must have at least two triangles. we cannot build a bvh for zero
     // triangles, and a bvh of one triangle has no internal nodes
     // which requires special handling which we forgo
     if (triangle_count <= 1) {
         fprintf(stderr, "too few triangles in scene: %d", triangle_count);
-        return -1;
+        return false;
     }
 
     // events for measuring elapsed time
     cudaEvent_t start, stop;
-    CUDA_CHECK(cudaEventCreate(&start));
-    CUDA_CHECK(cudaEventCreate(&stop));
-    CUDA_CHECK(cudaEventRecord(start));
+    RETURN_IF_CUDA_ERR(cudaEventCreate(&start));
+    RETURN_IF_CUDA_ERR(cudaEventCreate(&stop));
+    RETURN_IF_CUDA_ERR(cudaEventRecord(start));
 
-#define BLOCK_SIZE 1024
-    dim3 block_count(ROUND_UP(triangle_count, BLOCK_SIZE), 1, 1);
-    uint block_size(BLOCK_SIZE);
+    const int block_size = 1024;
+    const int num_blocks = ceiling_div(triangle_count, static_cast<unsigned int>(block_size));
 
-    bvh->d_scene = *s;
     // copy scene to device
-    CUDA_CHECK(cudaMalloc(&bvh->d_scene.positions, sizeof(float3) * s->position_count));
-    CUDA_CHECK(cudaMemcpy(
-        bvh->d_scene.positions,
-        s->positions,
-        sizeof(float3) * s->position_count,
+    RETURN_IF_FALSE(bvh.positions.resize(s.positions.get_num_elements()));
+    RETURN_IF_CUDA_ERR(cudaMemcpy(
+        bvh.positions.get_ptr(),
+        s.positions.get_ptr(),
+        sizeof(float3) * s.positions.get_num_elements(),
         cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMalloc(&bvh->d_scene.normals, sizeof(float3) * s->normal_count));
-    CUDA_CHECK(cudaMemcpy(
-        bvh->d_scene.normals,
-        s->normals,
-        sizeof(float3) * s->normal_count,
+    RETURN_IF_FALSE(bvh.normals.resize(s.normals.get_num_elements()));
+    RETURN_IF_CUDA_ERR(cudaMemcpy(
+        bvh.normals.get_ptr(),
+        s.normals.get_ptr(),
+        sizeof(float3) * s.normals.get_num_elements(),
         cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMalloc(&bvh->d_scene.indices, sizeof(uint2) * s->index_count));
-    CUDA_CHECK(cudaMemcpy(
-        bvh->d_scene.indices, s->indices, sizeof(uint2) * s->index_count, cudaMemcpyHostToDevice));
+    RETURN_IF_FALSE(bvh.indices.resize(s.indices.get_num_elements()));
+    RETURN_IF_CUDA_ERR(cudaMemcpy(
+        bvh.indices.get_ptr(),
+        s.indices.get_ptr(),
+        sizeof(uint2) * s.indices.get_num_elements(),
+        cudaMemcpyHostToDevice));
 
     // allocate array for morton and ids in dimension of triangles
-    unsigned int* d_morton = nullptr;
-    CUDA_CHECK(cudaMalloc(&d_morton, sizeof(unsigned int) * triangle_count));
-    unsigned int* d_ids = nullptr;
-    CUDA_CHECK(cudaMalloc(&d_ids, sizeof(unsigned int) * triangle_count));
+    buf_gpu<unsigned int> d_morton;
+    RETURN_IF_FALSE(d_morton.resize(triangle_count));
+    buf_gpu<unsigned int> d_ids;
+    RETURN_IF_FALSE(d_ids.resize(triangle_count));
 
-    assign_morton<<<block_count, block_size>>>(*bvh, d_morton, d_ids, triangle_count);
-    CUDA_SYNC_CHECK();
+    assign_morton<<<num_blocks, block_size>>>(
+        bvh.positions.get_ptr(),
+        bvh.indices.get_ptr(),
+        s.soffset,
+        s.sextent,
+        d_morton.get_ptr(),
+        d_ids.get_ptr(),
+        triangle_count);
+    RETURN_IF_CUDA_ERR(cudaGetLastError());
 
     // sort the key, value pairs according to morton codes
-    unsigned int* d_morton_sorted = nullptr;
-    CUDA_CHECK(cudaMalloc(&d_morton_sorted, sizeof(unsigned int) * triangle_count));
-    unsigned int* d_ids_sorted = nullptr;
-    CUDA_CHECK(cudaMalloc(&d_ids_sorted, sizeof(unsigned int) * triangle_count));
+    buf_gpu<unsigned int> d_morton_sorted;
+    RETURN_IF_FALSE(d_morton_sorted.resize(triangle_count));
+    buf_gpu<unsigned int> d_ids_sorted;
+    RETURN_IF_FALSE(d_ids_sorted.resize(triangle_count));
 
     // Determine temporary device storage requirements.
-    void* d_temp_storage      = nullptr;
-    size_t temp_storage_bytes = 0;
-    cub::DeviceRadixSort::SortPairs(
-        d_temp_storage,
-        temp_storage_bytes,
-        d_morton, // keys_in
-        d_morton_sorted, // keys_out
-        d_ids, // values_in
-        d_ids_sorted, // values_out
-        triangle_count);
+    size_t num_tmp_bytes = 0;
+    RETURN_IF_CUDA_ERR(cub::DeviceRadixSort::SortPairs(
+        nullptr,
+        num_tmp_bytes,
+        d_morton.get_ptr(), // keys_in
+        d_morton_sorted.get_ptr(), // keys_out
+        d_ids.get_ptr(), // values_in
+        d_ids_sorted.get_ptr(), // values_out
+        triangle_count));
     // Allocate temporary storage
-    CUDA_CHECK(cudaMalloc(&d_temp_storage, temp_storage_bytes));
+    buf_gpu<char> d_tmp;
+    RETURN_IF_FALSE(d_tmp.resize(num_tmp_bytes));
     // Run sorting operation, sorting is stable.
     // https://nvidia.github.io/cccl/unstable/cub/api/structcub_1_1DeviceRadixSort.html
-    cub::DeviceRadixSort::SortPairs(
-        d_temp_storage,
-        temp_storage_bytes,
-        d_morton, // keys_in
-        d_morton_sorted, // keys_out
-        d_ids, // values_in
-        d_ids_sorted, // values_out
-        triangle_count);
-    // free temporary storage
-    CUDA_CHECK(cudaFree(d_temp_storage));
-
-    CUDA_SYNC_CHECK();
-    CUDA_CHECK(cudaFree(d_ids));
-    CUDA_CHECK(cudaFree(d_morton));
+    RETURN_IF_CUDA_ERR(cub::DeviceRadixSort::SortPairs(
+        d_tmp.get_ptr(),
+        num_tmp_bytes,
+        d_morton.get_ptr(), // keys_in
+        d_morton_sorted.get_ptr(), // keys_out
+        d_ids.get_ptr(), // values_in
+        d_ids_sorted.get_ptr(), // values_out
+        triangle_count));
 
     // allocate BVH (n leaf nodes, n - 1 internal nodes)
-    CUDA_CHECK(cudaMalloc(&bvh->leaf_nodes, sizeof(bvh_node) * triangle_count));
-    CUDA_CHECK(cudaMalloc(&bvh->internal_nodes, sizeof(bvh_node) * (triangle_count - 1)));
+    RETURN_IF_FALSE(bvh.leaf_nodes.resize(triangle_count));
+    RETURN_IF_FALSE(bvh.internal_nodes.resize(triangle_count - 1));
     // construct leaf nodes
-    leaf_nodes<<<block_count, block_size>>>(d_ids_sorted, triangle_count, *bvh);
-
-    CUDA_SYNC_CHECK();
+    leaf_nodes<<<num_blocks, block_size>>>(
+        d_ids_sorted.get_ptr(),
+        triangle_count,
+        bvh.leaf_nodes.get_ptr(),
+        bvh.internal_nodes.get_ptr());
+    RETURN_IF_CUDA_ERR(cudaGetLastError());
 
     // construct internal nodes
-    internal_nodes<<<block_count, block_size>>>(
-        d_morton_sorted, d_ids_sorted, triangle_count, bvh->leaf_nodes, bvh->internal_nodes);
-
-    CUDA_SYNC_CHECK();
-    CUDA_CHECK(cudaFree(d_ids_sorted));
-    CUDA_CHECK(cudaFree(d_morton_sorted));
+    internal_nodes<<<num_blocks, block_size>>>(
+        d_morton_sorted.get_ptr(),
+        d_ids_sorted.get_ptr(),
+        triangle_count,
+        bvh.leaf_nodes.get_ptr(),
+        bvh.internal_nodes.get_ptr());
+    RETURN_IF_CUDA_ERR(cudaGetLastError());
 
     // calculate bounding boxes by walking the hierarchy toward the root
-    set_aabb<<<block_count, block_size>>>(
-        triangle_count, bvh->leaf_nodes, bvh->internal_nodes, *bvh);
+    set_aabb<<<num_blocks, block_size>>>(
+        triangle_count,
+        bvh.leaf_nodes.get_ptr(),
+        bvh.internal_nodes.get_ptr(),
+        bvh.positions.get_ptr(),
+        bvh.indices.get_ptr());
+    RETURN_IF_CUDA_ERR(cudaGetLastError());
 
     // print elapsed time
-    CUDA_CHECK(cudaEventRecord(stop));
-    CUDA_CHECK(cudaEventSynchronize(stop));
+    RETURN_IF_CUDA_ERR(cudaEventRecord(stop));
+    RETURN_IF_CUDA_ERR(cudaEventSynchronize(stop));
     float milliseconds = 0.f;
-    CUDA_CHECK(cudaEventElapsedTime(&milliseconds, start, stop));
+    RETURN_IF_CUDA_ERR(cudaEventElapsedTime(&milliseconds, start, stop));
     printf("building took %fs\n", milliseconds * 1e-3f);
 
-    CUDA_SYNC_CHECK();
-
-    return 0;
-#undef BLOCK_SIZE
-}
-
-void clean(bvh* bvh)
-{
-    // free bvh
-    CUDA_CHECK(cudaFree(bvh->leaf_nodes));
-    CUDA_CHECK(cudaFree(bvh->internal_nodes));
-
-    // free device scene
-    CUDA_CHECK(cudaFree(bvh->d_scene.indices));
-    CUDA_CHECK(cudaFree(bvh->d_scene.normals));
-    CUDA_CHECK(cudaFree(bvh->d_scene.positions));
+    return true;
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 Nol Moonen
+// Copyright (c) 2022-2026 Nol Moonen
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,17 +20,16 @@
 
 #pragma once
 
+#include "util.h"
+
 #include <sutil/vec_math.h>
 
 struct scene {
-    float3* positions;
-    unsigned int position_count;
-    float3* normals;
-    unsigned int normal_count;
+    buf_cpu<float3> positions;
+    buf_cpu<float3> normals;
     /// Three consecutive indices define the three points of a triangle.
     /// The two indices are the vertex position and normal.
-    uint2* indices;
-    unsigned int index_count;
+    buf_cpu<uint2> indices;
     float3 soffset; // Scene offset.
     float3 sextent; // Scene extent.
 };
@@ -38,7 +37,5 @@ struct scene {
 /// Only accepts triangle faces defined by v/t/n (so no v//n for example).
 /// Calculates the scene minimum and maximum points.
 /// Normals are assumed to be unitized.
-/// Returns 0 on success.
-int read_scene(scene* s, const char* filename);
-
-void free_scene(scene* s);
+/// Returns `true` on success.
+[[nodiscard]] bool read_scene(scene& s, const char* filename);
