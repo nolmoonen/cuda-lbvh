@@ -274,9 +274,9 @@ __global__ void generate_pixel_regeneration(
             bvh_root);
 
         // atomically add to buffer
-        atomicAdd(&buffer[4 * image_idx + 0], radiance.x / float(sample_count));
-        atomicAdd(&buffer[4 * image_idx + 1], radiance.y / float(sample_count));
-        atomicAdd(&buffer[4 * image_idx + 2], radiance.z / float(sample_count));
+        atomicAdd(&buffer[3 * image_idx + 0], radiance.x / float(sample_count));
+        atomicAdd(&buffer[3 * image_idx + 1], radiance.y / float(sample_count));
+        atomicAdd(&buffer[3 * image_idx + 2], radiance.z / float(sample_count));
     }
 }
 
@@ -310,7 +310,7 @@ bool generate(
     RETURN_IF_FALSE(d_cam.resize(1));
     RETURN_IF_CUDA_ERR(cudaMemcpy(d_cam.get_ptr(), &cam, sizeof(camera), cudaMemcpyHostToDevice));
 
-    const int num_colors = size_y * size_x * 4;
+    const int num_colors = size_y * size_x * 3;
 
     // create output buffer on device
     buf_gpu<float> d_buffer;
@@ -366,9 +366,9 @@ bool generate(
 
     // convert buffer to format accepted by image writer
     for (int i = 0; i < size_y * size_x; i++) {
-        image[3 * i + 0] = radiance_to_srgb(h_buffer.get_ptr()[4 * i + 0]);
-        image[3 * i + 1] = radiance_to_srgb(h_buffer.get_ptr()[4 * i + 1]);
-        image[3 * i + 2] = radiance_to_srgb(h_buffer.get_ptr()[4 * i + 2]);
+        image[3 * i + 0] = radiance_to_srgb(h_buffer.get_ptr()[3 * i + 0]);
+        image[3 * i + 1] = radiance_to_srgb(h_buffer.get_ptr()[3 * i + 1]);
+        image[3 * i + 2] = radiance_to_srgb(h_buffer.get_ptr()[3 * i + 2]);
     }
 
     return true;
