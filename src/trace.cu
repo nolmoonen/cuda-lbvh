@@ -296,11 +296,6 @@ bool generate(
     float3 target,
     float3 up)
 {
-    // events for measuring elapsed time
-    cudaEvent_t start, stop;
-    RETURN_IF_CUDA_ERR(cudaEventCreate(&start));
-    RETURN_IF_CUDA_ERR(cudaEventCreate(&stop));
-    RETURN_IF_CUDA_ERR(cudaEventRecord(start));
 
     // initialize camera based on the passed in variables
     float aspect = float(size_x) / float(size_y);
@@ -328,6 +323,12 @@ bool generate(
     RETURN_IF_FALSE(d_idx.resize(1));
     RETURN_IF_CUDA_ERR(cudaMemset(d_idx.get_ptr(), 0, sizeof(unsigned long long int)));
 
+    // events for measuring elapsed time
+    cudaEvent_t start, stop;
+    RETURN_IF_CUDA_ERR(cudaEventCreate(&start));
+    RETURN_IF_CUDA_ERR(cudaEventCreate(&stop));
+    RETURN_IF_CUDA_ERR(cudaEventRecord(start));
+
     // launch kernel
     generate_pixel_regeneration<<<1024, 1024>>>(
         size_x,
@@ -341,6 +342,18 @@ bool generate(
         bvh.indices.get_ptr(),
         bvh.get_root());
     RETURN_IF_CUDA_ERR(cudaGetLastError());
+
+    // print elapsed time
+    RETURN_IF_CUDA_ERR(cudaEventRecord(stop));
+    RETURN_IF_CUDA_ERR(cudaEventSynchronize(stop));
+    float milliseconds = 0.f;
+    RETURN_IF_CUDA_ERR(cudaEventElapsedTime(&milliseconds, start, stop));
+    const float seconds = milliseconds * 1e-3f;
+    const int num_rays  = size_y * size_x * sample_count;
+    printf(
+        " tracing took %5.5fs, %5.2f million rays per second\n",
+        seconds,
+        num_rays / seconds * 1e-6f);
 
     // when kernel is done, copy buffer back to host
     buf_cpu<float> h_buffer;
@@ -357,18 +370,6 @@ bool generate(
         image[3 * i + 1] = radiance_to_srgb(h_buffer.get_ptr()[4 * i + 1]);
         image[3 * i + 2] = radiance_to_srgb(h_buffer.get_ptr()[4 * i + 2]);
     }
-
-    // print elapsed time
-    RETURN_IF_CUDA_ERR(cudaEventRecord(stop));
-    RETURN_IF_CUDA_ERR(cudaEventSynchronize(stop));
-    float milliseconds = 0.f;
-    RETURN_IF_CUDA_ERR(cudaEventElapsedTime(&milliseconds, start, stop));
-    const float seconds = milliseconds * 1e-3f;
-    const int num_rays  = size_y * size_x * sample_count;
-    printf(
-        " tracing took %5.5fs, %5.2f million rays per second\n",
-        seconds,
-        num_rays / seconds * 1e-6f);
 
     return true;
 }
