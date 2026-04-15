@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 Nol Moonen
+// Copyright (c) 2022-2026 Nol Moonen
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,7 +25,5 @@
 
 /// Builds a BVH on the device based on the input scene. Scene must have at
 /// at least two triangles.
-/// Returns 0 on success.
-int build(scene* s, bvh* bvh);
-
-void clean(bvh* bvh);
+/// Returns `true` on success.
+[[nodiscard]] bool build(const scene& s, bvh& bvh);

@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 Nol Moonen
+// Copyright (c) 2022-2026 Nol Moonen
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -54,10 +54,14 @@ struct bvh_node {
 };
 
 struct bvh {
-    /// Leaf nodes, one for every photon data element.
-    bvh_node* leaf_nodes;
-    /// Internal nodes, amount equal to #leaf nodes - 1.
-    bvh_node* internal_nodes;
-    /// Scene, but all arrays are allocated on device.
-    scene d_scene;
+    const bvh_node* get_root() const { return internal_nodes.get_ptr(); }
+
+    // Leaf nodes, one for every photon data element.
+    buf_gpu<bvh_node> leaf_nodes;
+    // Internal nodes, amount equal to #leaf nodes - 1.
+    buf_gpu<bvh_node> internal_nodes;
+    // See `scene`.
+    buf_gpu<float3> positions;
+    buf_gpu<float3> normals;
+    buf_gpu<uint2> indices;
 };

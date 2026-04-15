@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <stdio.h>
-#include <time.h>
+#include "build.h"
+#include "trace.h"
 
 #ifdef __GNUC__
 #pragma GCC diagnostic push
@@ -31,20 +31,18 @@
 #pragma GCC diagnostic pop
 #endif
 
-#include "build.h"
-#include "trace.h"
+#include <cstdio>
+#include <vector>
 
 // TODO
-// - containers for device allocations
-// - proper error management, release of resources upon fail
 // - separate allocations from cuda event measurement
 // - reduce trace time to something reasonable
 
 int main(int argc, char* argv[])
 {
-    int ret;
     if (argc != 15) {
         fprintf(stderr, "did not specify correct amount of parameters\n");
+        return EXIT_FAILURE;
     }
 
     // read input
@@ -67,25 +65,24 @@ int main(int argc, char* argv[])
 
     // parse obj file
     scene s;
-    ret = read_scene(&s, file_in);
-    if (ret != 0) return -1;
+    if (!read_scene(s, file_in)) {
+        return EXIT_FAILURE;
+    }
 
     // build bvh
     bvh bvh;
-    ret = build(&s, &bvh);
-    if (ret != 0) return -1;
+    if (!build(s, bvh)) {
+        return EXIT_FAILURE;
+    }
 
     // generate image
-    uchar* image = (uchar*)malloc(sizeof(char) * 3 * size_x * size_y);
-    generate(size_x, size_y, sample_count, image, bvh, origin, target, up);
+    std::vector<uchar> image(size_y * size_x * 3);
+    if (!generate(size_x, size_y, sample_count, image.data(), bvh, origin, target, up)) {
+        return EXIT_FAILURE;
+    }
 
     // write image to file
     stbi_flip_vertically_on_write(1);
-    stbi_write_png(file_out, size_x, size_y, 3, image, size_x * 3);
-    free(image);
+    stbi_write_png(file_out, size_x, size_y, 3, image.data(), size_x * 3);
     printf("generated %s\n", file_out);
-
-    // clean up
-    clean(&bvh);
-    free_scene(&s);
 }
