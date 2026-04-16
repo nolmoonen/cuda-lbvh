@@ -27,7 +27,7 @@
 #include <sutil/vec_math.h>
 
 /// Expands a 10-bit integer into 30 bits by inserting 2 zeros after each bit.
-__forceinline__ __device__ unsigned int expand_bits(unsigned int v)
+__device__ unsigned int expand_bits(unsigned int v)
 {
     v = (v * 0x00010001u) & 0xFF0000FFu;
     v = (v * 0x00000101u) & 0x0F00F00Fu;
@@ -38,7 +38,7 @@ __forceinline__ __device__ unsigned int expand_bits(unsigned int v)
 
 /// Calculates a 30-bit Morton code for the given 3D point located
 /// within the unit cube [0,1].
-__forceinline__ __device__ unsigned int morton_3d(float x, float y, float z)
+__device__ unsigned int morton_3d(float x, float y, float z)
 {
     x               = fclampf(x * 1024.f, 0.f, 1023.f);
     y               = fclampf(y * 1024.f, 0.f, 1023.f);
@@ -103,7 +103,7 @@ __global__ void leaf_nodes(
     internal_nodes[thread_id].parent = nullptr;
 }
 
-__forceinline__ __device__ int delta(int a, int b, unsigned int n, unsigned int* c, unsigned int ka)
+__device__ int delta(int a, int b, unsigned int n, unsigned int* c, unsigned int ka)
 {
     // this guard is for leaf nodes, not internal nodes (hence [0, n-1])
     if (b < 0 || b > n - 1) return -1;
@@ -117,9 +117,22 @@ __forceinline__ __device__ int delta(int a, int b, unsigned int n, unsigned int*
     return __clz(ka ^ kb);
 }
 
-__forceinline__ __device__ int2
-determine_range(unsigned int* sorted_morton_codes, unsigned int n, int i)
+// Build the internal nodes.
+__global__ void internal_nodes(
+    unsigned int* sorted_morton_codes,
+    unsigned int* sorted_object_ids,
+    unsigned int num_objects,
+    bvh_node* d_leaf_nodes,
+    bvh_node* d_internal_nodes)
 {
+    const unsigned int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+    // N.B., we want i in range [0, num_objects - 1) since every thread sets one internal node.
+    if (thread_id >= num_objects - 1) return;
+
+    // find out which range of objects the node corresponds to
+    unsigned int n = num_objects;
+    int i          = thread_id;
+
     unsigned int* c = sorted_morton_codes;
     unsigned int ki = c[i]; // key of i
 
@@ -128,13 +141,13 @@ determine_range(unsigned int* sorted_morton_codes, unsigned int n, int i)
     const int delta_r = delta(i, i + 1, n, c, ki);
 
     int d; // direction
-    int delta_min; // min of delta_r and delta_l
+    int delta_min; // delta(i, i - d)
     if (delta_r < delta_l) {
         d         = -1;
-        delta_min = delta_r;
+        delta_min = delta_r; // delta(i, i - (-1)) = delta(i, i + 1)
     } else {
-        d         = 1;
-        delta_min = delta_l;
+        d         = +1;
+        delta_min = delta_l; // delta(i, i - (+1)) = delta(i, i - 1)
     }
 
     // compute upper bound of the length of the range
@@ -153,58 +166,48 @@ determine_range(unsigned int* sorted_morton_codes, unsigned int n, int i)
     const int j = i + l * d;
 
     // ensure i <= j
-    return i < j ? make_int2(i, j) : make_int2(j, i);
-}
 
-__forceinline__ __device__ int find_split(
-    unsigned int* sorted_morton_codes, int first, int last, unsigned int n)
-{
-    const unsigned int first_code = sorted_morton_codes[first];
+    // Identical Morton codes => split the range in the middle.
 
-    // calculate the number of highest bits that are the same
-    // for all objects, using the count-leading-zeros intrinsic
+    // const unsigned int first_code = sorted_morton_codes[first];
+    // const unsigned int last_code  = sorted_morton_codes[last];
 
-    const int common_prefix = delta(first, last, n, sorted_morton_codes, first_code);
+    // int split;
+    // if (first_code == last_code) {
+    //     split = (first + last) / 2;
+    // } else {
 
-    // use binary search to find where the next bit differs
-    // specifically, we are looking for the highest object that
-    // shares more than commonPrefix bits with the first one
+    // Calculate the number of highest bits that are the same
+    // for all objects, using the count-leading-zeros intrinsic.
 
-    int split = first; // initial guess
-    int step  = last - first;
+    const int delta_node = delta(i, j, n, c, ki);
 
-    do {
-        step                = (step + 1) >> 1; // exponential decrease
-        const int new_split = split + step; // proposed new position
+    // Use binary search to find where the next bit differs.
+    // Specifically, we are looking for the highest object that
+    // shares more than `common_prefix` bits with the first one.
 
-        if (new_split < last) {
-            const int split_prefix = delta(first, new_split, n, sorted_morton_codes, first_code);
-            if (split_prefix > common_prefix) {
-                split = new_split; // accept proposal
-            }
+    // int split = first; // initial guess
+    // int step  = last - first;
+
+    int s = 0;
+    for (unsigned int t = (l + 1) >> 1; t > 1; t = (t + 1) >> 1) {
+        if (delta(i, i + (s + t) * d, n, c, ki) > delta_node) {
+            s += t;
         }
-    } while (step > 1);
+    }
+    assert(t == 1); // FIXME does not need to hold?
+    // t = 1 iteration
+    if (delta(i, i + (s + 1) * d, n, c, ki) > delta_node) {
+        ++s;
+    }
 
-    return split;
-}
+    int split = i + s * d + min(d, 0);
 
-// Build the internal nodes.
-__global__ void internal_nodes(
-    unsigned int* sorted_morton_codes,
-    unsigned int* sorted_object_ids,
-    unsigned int num_objects,
-    bvh_node* d_leaf_nodes,
-    bvh_node* d_internal_nodes)
-{
-    const unsigned int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
-    // N.B., we want i in range [0, num_objects - 1) since every thread sets one internal node.
-    if (thread_id >= num_objects - 1) return;
-
-    // find out which range of objects the node corresponds to
-    const int2 range = determine_range(sorted_morton_codes, num_objects, thread_id);
+    const int2 range = i < j ? make_int2(i, j) : make_int2(j, i);
 
     // determine where to split the range
-    const int split = find_split(sorted_morton_codes, range.x, range.y, num_objects);
+    int first = range.x;
+    int last  = range.y;
 
     // select child a
     bvh_node* child_a;

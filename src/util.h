@@ -38,13 +38,13 @@ __device__ __host__ constexpr auto ceiling_div(const T a, const U b)
     return a / b + (a % b > 0 ? 1 : 0);
 }
 
-#define RETURN_IF_FALSE(call)                                                      \
-    do {                                                                           \
-        const bool res_ = call;                                                    \
-        if (!res_) {                                                               \
-            fprintf(stderr, #call "returned false at " __FILE__ "%d\n", __LINE__); \
-            return false;                                                          \
-        }                                                                          \
+#define RETURN_IF_FALSE(call)                                                       \
+    do {                                                                            \
+        const bool res_ = call;                                                     \
+        if (!res_) {                                                                \
+            fprintf(stderr, #call "returned false at " __FILE__ ":%d\n", __LINE__); \
+            return false;                                                           \
+        }                                                                           \
     } while (0)
 
 #define LOG_CUDA(err)                          \
