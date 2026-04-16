@@ -23,12 +23,14 @@
 #include "util.h"
 #include "vec_math_helper.h"
 
+#include <cassert>
 #include <cub/device/device_radix_sort.cuh>
 #include <sutil/vec_math.h>
 
 /// Expands a 10-bit integer into 30 bits by inserting 2 zeros after each bit.
 __device__ unsigned int expand_bits(unsigned int v)
 {
+    assert(v < 1 << 10);
     v = (v * 0x00010001u) & 0xFF0000FFu;
     v = (v * 0x00000101u) & 0x0F00F00Fu;
     v = (v * 0x00000011u) & 0xC30C30C3u;
@@ -103,18 +105,20 @@ __global__ void leaf_nodes(
     internal_nodes[thread_id].parent = nullptr;
 }
 
-__device__ int delta(int a, int b, unsigned int n, unsigned int* c, unsigned int ka)
+__device__ int delta(int a, int b, unsigned int n, unsigned int* c)
 {
+    assert(0 <= a && a < n);
     // this guard is for leaf nodes, not internal nodes (hence [0, n-1])
-    if (b < 0 || b > n - 1) return -1;
-    unsigned int kb = c[b];
-    if (ka == kb) {
-        // if keys are equal, use id as fallback
-        // (+32 because they have the same morton code)
-        return 32 + __clz((unsigned int)a ^ (unsigned int)b);
-    }
+    if (b < 0 || b >= n) return -1;
+    const unsigned int ka = (uint64_t{c[a]} << 32) | a;
+    const unsigned int kb = (uint64_t{c[b]} << 32) | b;
+    // if (ka == kb) {
+    //     // if keys are equal, use id as fallback
+    //     // (+32 because they have the same morton code)
+    //     return 64 + __clzll((unsigned int)a ^ (unsigned int)b);
+    // }
     // clz = count leading zeros
-    return __clz(ka ^ kb);
+    return __clzll(ka ^ kb);
 }
 
 // Build the internal nodes.
@@ -134,12 +138,12 @@ __global__ void internal_nodes(
     int i          = thread_id;
 
     unsigned int* c = sorted_morton_codes;
-    unsigned int ki = c[i]; // key of i
 
-    // determine direction of the range (+1 or -1)
-    const int delta_l = delta(i, i - 1, n, c, ki);
-    const int delta_r = delta(i, i + 1, n, c, ki);
+    // Determine direction of the range (+1 or -1).
+    const int delta_l = delta(i, i - 1, n, c);
+    const int delta_r = delta(i, i + 1, n, c);
 
+    // Compute upper bound for the length of the range.
     int d; // direction
     int delta_min; // delta(i, i - d)
     if (delta_r < delta_l) {
@@ -150,64 +154,44 @@ __global__ void internal_nodes(
         delta_min = delta_l; // delta(i, i - (+1)) = delta(i, i - 1)
     }
 
-    // compute upper bound of the length of the range
     unsigned int l_max = 2;
-    while (delta(i, i + l_max * d, n, c, ki) > delta_min) {
+    while (delta(i, i + l_max * d, n, c) > delta_min) {
         l_max <<= 1;
     }
 
-    // find other end using binary search
+    // Find the other end using binary search.
     unsigned int l = 0;
     for (unsigned int t = l_max >> 1; t > 0; t >>= 1) {
-        if (delta(i, i + (l + t) * d, n, c, ki) > delta_min) {
+        if (delta(i, i + (l + t) * d, n, c) > delta_min) {
             l += t;
         }
     }
     const int j = i + l * d;
 
-    // ensure i <= j
+    // Find the split position using binary search.
 
-    // Identical Morton codes => split the range in the middle.
-
-    // const unsigned int first_code = sorted_morton_codes[first];
-    // const unsigned int last_code  = sorted_morton_codes[last];
-
-    // int split;
-    // if (first_code == last_code) {
-    //     split = (first + last) / 2;
+    int split;
+    // if (c[i] == c[j]) {
+    //     split = (i + j) >> 1;
     // } else {
-
-    // Calculate the number of highest bits that are the same
-    // for all objects, using the count-leading-zeros intrinsic.
-
-    const int delta_node = delta(i, j, n, c, ki);
-
-    // Use binary search to find where the next bit differs.
-    // Specifically, we are looking for the highest object that
-    // shares more than `common_prefix` bits with the first one.
-
-    // int split = first; // initial guess
-    // int step  = last - first;
+    const int delta_node = delta(i, j, n, c);
 
     int s = 0;
     for (unsigned int t = (l + 1) >> 1; t > 1; t = (t + 1) >> 1) {
-        if (delta(i, i + (s + t) * d, n, c, ki) > delta_node) {
+        if (delta(i, i + (s + t) * d, n, c) > delta_node) {
             s += t;
         }
     }
-    assert(t == 1); // FIXME does not need to hold?
     // t = 1 iteration
-    if (delta(i, i + (s + 1) * d, n, c, ki) > delta_node) {
+    if (delta(i, i + (s + 1) * d, n, c) > delta_node) {
         ++s;
     }
 
-    int split = i + s * d + min(d, 0);
+    split = i + s * d + min(d, 0);
+    // }
 
+    // Output child pointers
     const int2 range = i < j ? make_int2(i, j) : make_int2(j, i);
-
-    // determine where to split the range
-    int first = range.x;
-    int last  = range.y;
 
     // select child a
     bvh_node* child_a;
