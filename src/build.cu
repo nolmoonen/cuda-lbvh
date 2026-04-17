@@ -230,6 +230,20 @@ __global__ void internal_nodes(
     child_b->parent                     = &d_internal_nodes[thread_id];
 }
 
+// Load float3 at global level (cache in L2 and below, not L1).
+__device__ float3 __ldcg(const float3* p)
+{
+    return make_float3(__ldcg(&(p->x)), __ldcg(&(p->y)), __ldcg(&(p->z)));
+}
+
+// Store float3 at global level (cache in L2 and below, not L1).
+__device__ void __stcg(float3* p, const float3& q)
+{
+    __stcg(&(p->x), q.x);
+    __stcg(&(p->y), q.y);
+    __stcg(&(p->z), q.z);
+}
+
 // Set internal node bounding boxes by traversing the tree from the leaf nodes.
 __global__ void set_aabb(
     unsigned int num_objects,
@@ -252,31 +266,48 @@ __global__ void set_aabb(
     float3 w = positions[idx_w];
 
     // set bounding box of leaf node
-    d_leaf_nodes[thread_id].min = fminf(u, fminf(v, w));
-    d_leaf_nodes[thread_id].max = fmaxf(u, fmaxf(v, w));
+    const float3 min = fminf(u, fminf(v, w));
+    const float3 max = fmaxf(u, fmaxf(v, w));
 
-    // recursively set tree bounding boxes
-    // {current_node} is always an internal node (since it is parent of another)
+    // Bounding boxes must be loaded and stored without caching in L1,
+    // as they may be loaded and stored by threads not on the same SM.
+
+    __stcg(&(d_leaf_nodes[thread_id].min), min);
+    __stcg(&(d_leaf_nodes[thread_id].max), max);
+
+    // Recursively set tree bounding boxes, `current_node` is always an
+    // internal node (since it is parent of another).
     bvh_node* current_node = d_leaf_nodes[thread_id].parent;
     while (true) {
-        // we have reached the parent of the root node: terminate
+        // Memory fences must be used to lock-step setting the bounding
+        // boxes and marking nodes as visited.
+        __threadfence();
+
+        // We have reached the parent of the root node: terminate.
         if (current_node == nullptr) break;
 
-        // we have reached an inner node: check whether the node was visited
+        // We have reached an inner node: check whether the node was visited.
         unsigned int visited = atomicAdd(&current_node->visited, 1);
+        assert(visited == 0 || visited == 1);
 
-        // this is the first thread entering: terminate
+        // This is the first thread entering: terminate
         if (visited == 0) break;
 
-        // this is the second thread entering, we know that our sibling has
-        // reached the current node and terminated,
-        // and hence the sibling bounding box is correct
+        __threadfence();
 
-        // set running bounding box to be the union of bounding boxes
-        current_node->min = fminf(current_node->child_a->min, current_node->child_b->min);
-        current_node->max = fmaxf(current_node->child_a->max, current_node->child_b->max);
+        // This is the second thread entering, we know that our sibling has reached
+        // the current node and terminated, and hence the sibling bounding box is correct.
 
-        // continue traversal
+        // Set running bounding box to be the union of bounding boxes.
+        const float3 a_min = __ldcg(&(current_node->child_a->min));
+        const float3 a_max = __ldcg(&(current_node->child_a->max));
+        const float3 b_min = __ldcg(&(current_node->child_b->min));
+        const float3 b_max = __ldcg(&(current_node->child_b->max));
+
+        __stcg(&(current_node->min), fminf(a_min, b_min));
+        __stcg(&(current_node->max), fmaxf(a_max, b_max));
+
+        // Continue traversal.
         current_node = current_node->parent;
     }
 }
