@@ -353,7 +353,7 @@ bool generate(
     const float seconds = milliseconds * 1e-3f;
     const int num_rays  = size_y * size_x * sample_count;
     printf(
-        " tracing took %5.5fs, %5.2f million rays per second\n",
+        " tracing took %5.5fs, %6.2f million rays per second\n",
         seconds,
         num_rays / seconds * 1e-6f);
 

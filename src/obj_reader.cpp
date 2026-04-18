@@ -21,35 +21,60 @@
 #include "obj_reader.h"
 
 #include <cassert>
+#include <charconv>
 #include <chrono>
 #include <cstdio>
+#include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <limits>
-#include <string>
 
-bool read_scene(scene& s, const char* filename)
+template <typename t>
+bool parse(t& x, const char*& begin, const char* end)
+{
+    auto [ptr, ec] = std::from_chars(begin, end, x);
+    if (ec != std::errc()) {
+        return false;
+    }
+
+    begin = ptr;
+    return true;
+}
+
+bool read_scene(scene& s, const std::filesystem::path& filename)
 {
     const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
 
     std::fstream stream(filename);
     if (stream.bad()) {
-        fprintf(stderr, "Could not open scene file \"%s\".\n", filename);
+        fprintf(stderr, "Could not open scene file \"%s\".\n", filename.c_str());
         return false;
     }
 
-    // Read file line by line.
-    std::string line;
+    // TODO reading the full file into memory takes about 25-35% of total scene loading,
+    // as well as a significant amount of memory. This can be improved by doing a
+    // buffered read.
+    std::vector<char> file(std::filesystem::file_size(filename));
+    stream.read(file.data(), file.size());
+    const std::chrono::steady_clock::time_point mid = std::chrono::steady_clock::now();
 
     float3 smin = make_float3(+std::numeric_limits<float>::max());
     float3 smax = make_float3(-std::numeric_limits<float>::max());
 
-    while (std::getline(stream, line)) {
-        if (line.size() < 2) continue;
+    const char* begin     = file.data();
+    const char* const end = file.data() + file.size();
 
-        if (line[0] == 'v' && line[1] == ' ') {
-            // vertex position
+    while (begin < end) {
+        if (end - begin >= 2 && *begin == 'v' && *(begin + 1) == ' ') {
+            begin += 2; // 'v '
+            // Vertex position.
             float3 v;
-            sscanf(line.c_str() + 2, "%f %f %f", &v.x, &v.y, &v.z);
+            RETURN_IF_FALSE(parse(v.x, begin, end));
+            ++begin; // skip ' '
+            RETURN_IF_FALSE(parse(v.y, begin, end));
+            ++begin; // skip ' '
+            RETURN_IF_FALSE(parse(v.z, begin, end));
+            ++begin; // skip '\n'
 
             // TODO these points may not necessarily be featured in a face.
             // However, finding the bounding box from the list of faces
@@ -58,42 +83,68 @@ bool read_scene(scene& s, const char* filename)
             smax = fmaxf(smax, v);
 
             s.positions.emplace_back(v);
-        } else if (line[0] == 'v' && line[1] == 'n') {
-            // vertex normal
+        } else if (end - begin >= 2 && *begin == 'v' && *(begin + 1) == 'n') {
+            begin += 3; // 'vn '
+            // Vertex normal.
             float3 n;
-            sscanf(line.c_str() + 2, "%f %f %f", &n.x, &n.y, &n.z);
+            RETURN_IF_FALSE(parse(n.x, begin, end));
+            ++begin; // skip ' '
+            RETURN_IF_FALSE(parse(n.y, begin, end));
+            ++begin; // skip ' '
+            RETURN_IF_FALSE(parse(n.z, begin, end));
+            ++begin; // skip '\n'
 
             s.normals.emplace_back(n);
-        } else if (line[0] == 'f') {
-            // face
+        } else if (end - begin >= 1 && *begin == 'f') {
+            begin += 2; // 'f '
+            // Face.
             uint2 i, j, k;
             unsigned int tmp;
-            sscanf(
-                line.c_str() + 2,
-                "%u/%u/%u %u/%u/%u %u/%u/%u",
-                &i.x,
-                &tmp,
-                &i.y,
-                &j.x,
-                &tmp,
-                &j.y,
-                &k.x,
-                &tmp,
-                &k.y);
+            RETURN_IF_FALSE(parse(i.x, begin, end));
+            ++begin; // skip '/'
+            RETURN_IF_FALSE(parse(tmp, begin, end));
+            ++begin; // skip '/'
+            RETURN_IF_FALSE(parse(i.y, begin, end));
+            ++begin; // skip ' '
+            RETURN_IF_FALSE(parse(j.x, begin, end));
+            ++begin; // skip '/'
+            RETURN_IF_FALSE(parse(tmp, begin, end));
+            ++begin; // skip '/'
+            RETURN_IF_FALSE(parse(j.y, begin, end));
+            ++begin; // skip ' '
+            RETURN_IF_FALSE(parse(k.x, begin, end));
+            ++begin; // skip '/'
+            RETURN_IF_FALSE(parse(tmp, begin, end));
+            ++begin; // skip '/'
+            RETURN_IF_FALSE(parse(k.y, begin, end));
+            ++begin; // skip '\n'
 
             s.indices.emplace_back(i - make_uint2(1u));
             s.indices.emplace_back(j - make_uint2(1u));
             s.indices.emplace_back(k - make_uint2(1u));
+        } else {
+            // Points `begin` to next '\n' if it exists, else `nullptr`.
+            begin = reinterpret_cast<const char*>(std::memchr(begin, '\n', end - begin));
+            if (begin == nullptr) break;
+            ++begin; // skip '\n'
         }
     }
 
     s.soffset = smin;
     s.sextent = smax - smin;
 
-    const std::chrono::steady_clock::time_point stop = std::chrono::steady_clock::now();
-    const std::chrono::duration<float> diff          = stop - start;
+    // TODO do a sanity check that all faces are complete?
 
-    printf("loaded %s with %zu triangles in %fs\n", filename, s.indices.size() / 3, diff.count());
+    const std::chrono::steady_clock::time_point stop = std::chrono::steady_clock::now();
+    const std::chrono::duration<float> diff_fileread = mid - start;
+    const std::chrono::duration<float> diff_total    = stop - start;
+
+    printf(
+        "loaded %s with %zu triangles in %fs (file read took %fs)\n",
+        filename.c_str(),
+        s.indices.size() / 3,
+        diff_total.count(),
+        diff_fileread.count());
 
     return true;
 }

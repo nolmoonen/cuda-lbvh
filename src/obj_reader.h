@@ -24,6 +24,7 @@
 
 #include <sutil/vec_math.h>
 
+#include <filesystem>
 #include <vector>
 
 struct scene {
@@ -40,4 +41,4 @@ struct scene {
 /// Calculates the scene minimum and maximum points.
 /// Normals are assumed to be unitized.
 /// Returns `true` on success.
-[[nodiscard]] bool read_scene(scene& s, const char* filename);
+[[nodiscard]] bool read_scene(scene& s, const std::filesystem::path& filename);
