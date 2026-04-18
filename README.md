@@ -7,16 +7,13 @@ LBVH, this allows for a simple illustration of its performance.
 
 ## Performance
 
-The table below lists the construction time and the rendering time for three
-scenes, each with a one megapixel resolution and a path length of up to 80
-bounces. The rendering time is the average of 128 samples. Note that the images
-are thumbnails, full resolution images can be found in `doc`.
+The table below lists the construction and rendering performance for three scenes, each with a one megapixel resolution, a path length of up to 80 bounces, and 250 samples per pixel. Note that the images are thumbnails, full resolution images can be found in `doc`.
 
-| Scene        | Triangle count  | Build time  | Trace time  | Image                         |
-|--------------|-----------------|-------------|-------------|-------------------------------|
-| `sanmiguel`  | 9.963.191       | 0.1429s     | 3.1695s     | ![](doc/sanmiguel_thumb.png)  |
-| `sibenik`    | 73.564          | 0.0022s     | 0.4071s     | ![](doc/sibenik_thumb.png)    |
-| `sponza`     | 262.267         | 0.0063s     | 0.7160s     | ![](doc/sponza_thumb.png)     |
+| Scene       | Triangle count | Build time | Build Mtriangles/s | Trace Mray/s | Image                                                                    |
+| ----------- | -------------- | ---------- | ------------------ | ------------ | ------------------------------------------------------------------------ |
+| `sanmiguel` | 9,963,191      | 29.8ms     | 333.79             | 0.53         | [![doc/sanmiguel_thumb.png](doc/sanmiguel_thumb.png)](doc/sanmiguel.png) |
+| `sibenik`   | 73,564         | 0.48ms     | 152.24             | 3.35         | [![doc/sibenik_thumb.png](doc/sibenik_thumb.png)](doc/sibenik.png)       |
+| `sponza`    | 262,267        | 0.96ms     | 273.33             | 1.88         | [![doc/sponza_thumb.png](doc/sponza_thumb.png)](doc/sponza.png)          |
 
 ## System requirements and dependencies
 

@@ -27,8 +27,8 @@ exe_loc = '$<TARGET_FILE:cuda-lbvh>'
 obj_dir = '@CMAKE_SOURCE_DIR@/scenes'
 
 if __name__ == '__main__':
-    size = 1024
-    samples = 128
+    size = 1000
+    samples = 250
     subprocess.run([
         exe_loc,
         os.path.join(obj_dir, 'sanmiguel.obj'),

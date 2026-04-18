@@ -217,7 +217,7 @@ __forceinline__ __device__ float3 generate_pixel(
 
         if (!h.hit) {
             // 'sky' color
-            const float3 color = make_float3(.6, .8f, 1.f);
+            const float3 color = make_float3(.65, .85f, 1.f);
             radiance += throughput * color;
             break;
         }
@@ -372,7 +372,7 @@ bool generate(
     const float seconds = milliseconds * 1e-3f;
     const int num_rays  = size_y * size_x * sample_count;
     printf(
-        " tracing took %5.5fs, %6.2f million rays per second\n",
+        " tracing took %6.5fs,  %6.2f million rays per second\n",
         seconds,
         num_rays / seconds * 1e-6f);
 

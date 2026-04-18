@@ -438,8 +438,8 @@ bool build(const scene& s, bvh& bvh)
     RETURN_IF_CUDA_ERR(cudaEventElapsedTime(&milliseconds, start, stop));
     const float seconds = milliseconds * 1e-3f;
     printf(
-        "building took %5.5fs, %6.2f million triangles per second\n",
-        seconds,
+        "building took %6.5fms, %6.2f million triangles per second\n",
+        milliseconds,
         num_triangles / seconds * 1e-6f);
 
     return true;
