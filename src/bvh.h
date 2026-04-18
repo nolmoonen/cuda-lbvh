@@ -58,5 +58,6 @@ struct bvh {
     // See `scene`.
     buf_gpu<float3> positions;
     buf_gpu<float3> normals;
-    buf_gpu<uint2> indices;
+    buf_gpu<int> pos_indices;
+    buf_gpu<int> nor_indices;
 };

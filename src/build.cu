@@ -56,7 +56,7 @@ __forceinline__ __device__ unsigned int morton_3d(float x, float y, float z)
 // For every triangle, assign a Morton code based on its center.
 __global__ void assign_morton(
     const float3* positions,
-    const uint2* indices,
+    const int* pos_indices,
     float3 scene_offset,
     float3 scene_extent,
     unsigned int* d_morton,
@@ -67,10 +67,10 @@ __global__ void assign_morton(
     if (thread_id >= object_count) return;
 
     // obtain center of triangle
-    unsigned int idx_u = indices[3 * thread_id + 0].x;
-    unsigned int idx_v = indices[3 * thread_id + 1].x;
-    unsigned int idx_w = indices[3 * thread_id + 2].x;
-    float3 pos         = (1.f / 3.f) * (positions[idx_u] + positions[idx_v] + positions[idx_w]);
+    int idx_u  = pos_indices[3 * thread_id + 0];
+    int idx_v  = pos_indices[3 * thread_id + 1];
+    int idx_w  = pos_indices[3 * thread_id + 2];
+    float3 pos = (1.f / 3.f) * (positions[idx_u] + positions[idx_v] + positions[idx_w]);
 
     // normalize position
     float x = (pos.x - scene_offset.x) / scene_extent.x;
@@ -251,7 +251,7 @@ __device__ void __stcg(float3* p, const float3& q)
 
 // Set internal node bounding boxes by traversing the tree from the leaf nodes.
 __global__ void set_aabb(
-    unsigned int num_objects, bvh_node* nodes, const float3* positions, const uint2* indices)
+    unsigned int num_objects, bvh_node* nodes, const float3* positions, const int* pos_indices)
 {
     const unsigned int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (thread_id >= num_objects) return;
@@ -260,9 +260,9 @@ __global__ void set_aabb(
 
     const unsigned int object_id = leaf_nodes[thread_id].object_id;
 
-    unsigned int idx_u = indices[3 * object_id + 0].x;
-    unsigned int idx_v = indices[3 * object_id + 1].x;
-    unsigned int idx_w = indices[3 * object_id + 2].x;
+    int idx_u = pos_indices[3 * object_id + 0];
+    int idx_v = pos_indices[3 * object_id + 1];
+    int idx_w = pos_indices[3 * object_id + 2];
 
     float3 u = positions[idx_u];
     float3 v = positions[idx_v];
@@ -322,7 +322,7 @@ __global__ void set_aabb(
 
 bool build(const scene& s, bvh& bvh)
 {
-    const int num_triangles = s.indices.size() / 3;
+    const int num_triangles = s.pos_indices.size() / 3;
     // must have at least two triangles. we cannot build a bvh for zero
     // triangles, and a bvh of one triangle has no internal nodes
     // which requires special handling which we forgo
@@ -377,11 +377,17 @@ bool build(const scene& s, bvh& bvh)
         s.normals.data(),
         sizeof(float3) * s.normals.size(),
         cudaMemcpyHostToDevice));
-    RETURN_IF_FALSE(bvh.indices.resize(s.indices.size()));
+    RETURN_IF_FALSE(bvh.pos_indices.resize(s.pos_indices.size()));
     RETURN_IF_CUDA_ERR(cudaMemcpy(
-        bvh.indices.get_ptr(),
-        s.indices.data(),
-        sizeof(uint2) * s.indices.size(),
+        bvh.pos_indices.get_ptr(),
+        s.pos_indices.data(),
+        sizeof(int) * s.pos_indices.size(),
+        cudaMemcpyHostToDevice));
+    RETURN_IF_FALSE(bvh.nor_indices.resize(s.nor_indices.size()));
+    RETURN_IF_CUDA_ERR(cudaMemcpy(
+        bvh.nor_indices.get_ptr(),
+        s.nor_indices.data(),
+        sizeof(int) * s.nor_indices.size(),
         cudaMemcpyHostToDevice));
 
     // allocate BVH (n - 1 internal nodes, n leaf nodes)
@@ -398,7 +404,7 @@ bool build(const scene& s, bvh& bvh)
 
     assign_morton<<<num_blocks, block_size>>>(
         bvh.positions.get_ptr(),
-        bvh.indices.get_ptr(),
+        bvh.pos_indices.get_ptr(),
         s.soffset,
         s.sextent,
         d_morton.get_ptr(),
@@ -422,7 +428,7 @@ bool build(const scene& s, bvh& bvh)
 
     // calculate bounding boxes by walking the hierarchy toward the root
     set_aabb<<<num_blocks, block_size>>>(
-        num_triangles, bvh.nodes.get_ptr(), bvh.positions.get_ptr(), bvh.indices.get_ptr());
+        num_triangles, bvh.nodes.get_ptr(), bvh.positions.get_ptr(), bvh.pos_indices.get_ptr());
     RETURN_IF_CUDA_ERR(cudaGetLastError());
 
     // print elapsed time

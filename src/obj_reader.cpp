@@ -98,30 +98,31 @@ bool read_scene(scene& s, const std::filesystem::path& filename)
         } else if (end - begin >= 1 && *begin == 'f') {
             begin += 2; // 'f '
             // Face.
-            uint2 i, j, k;
-            unsigned int tmp;
-            RETURN_IF_FALSE(parse(i.x, begin, end));
+            int i;
+            RETURN_IF_FALSE(parse(i, begin, end));
+            s.pos_indices.emplace_back(i - 1);
             ++begin; // skip '/'
-            RETURN_IF_FALSE(parse(tmp, begin, end));
+            RETURN_IF_FALSE(parse(i, begin, end));
             ++begin; // skip '/'
-            RETURN_IF_FALSE(parse(i.y, begin, end));
+            RETURN_IF_FALSE(parse(i, begin, end));
+            s.nor_indices.emplace_back(i - 1);
             ++begin; // skip ' '
-            RETURN_IF_FALSE(parse(j.x, begin, end));
+            RETURN_IF_FALSE(parse(i, begin, end));
+            s.pos_indices.emplace_back(i - 1);
             ++begin; // skip '/'
-            RETURN_IF_FALSE(parse(tmp, begin, end));
+            RETURN_IF_FALSE(parse(i, begin, end));
             ++begin; // skip '/'
-            RETURN_IF_FALSE(parse(j.y, begin, end));
+            RETURN_IF_FALSE(parse(i, begin, end));
+            s.nor_indices.emplace_back(i - 1);
             ++begin; // skip ' '
-            RETURN_IF_FALSE(parse(k.x, begin, end));
+            RETURN_IF_FALSE(parse(i, begin, end));
+            s.pos_indices.emplace_back(i - 1);
             ++begin; // skip '/'
-            RETURN_IF_FALSE(parse(tmp, begin, end));
+            RETURN_IF_FALSE(parse(i, begin, end));
             ++begin; // skip '/'
-            RETURN_IF_FALSE(parse(k.y, begin, end));
+            RETURN_IF_FALSE(parse(i, begin, end));
+            s.nor_indices.emplace_back(i - 1);
             ++begin; // skip '\n'
-
-            s.indices.emplace_back(i - make_uint2(1u));
-            s.indices.emplace_back(j - make_uint2(1u));
-            s.indices.emplace_back(k - make_uint2(1u));
         } else {
             // Points `begin` to next '\n' if it exists, else `nullptr`.
             begin = reinterpret_cast<const char*>(std::memchr(begin, '\n', end - begin));
@@ -142,7 +143,7 @@ bool read_scene(scene& s, const std::filesystem::path& filename)
     printf(
         "loaded %s with %zu triangles in %fs (file read took %fs)\n",
         filename.c_str(),
-        s.indices.size() / 3,
+        s.pos_indices.size() / 3,
         diff_total.count(),
         diff_fileread.count());
 

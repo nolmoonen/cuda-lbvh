@@ -31,8 +31,8 @@ struct scene {
     std::vector<float3> positions;
     std::vector<float3> normals;
     /// Three consecutive indices define the three points of a triangle.
-    /// The two indices are the vertex position and normal.
-    std::vector<uint2> indices;
+    std::vector<int> pos_indices;
+    std::vector<int> nor_indices;
     float3 soffset; // Scene offset.
     float3 sextent; // Scene extent.
 };

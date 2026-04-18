@@ -51,12 +51,12 @@ __forceinline__ __device__ float3 get_hit(
     float3 origin,
     float3 direction,
     const float3* positions,
-    const uint2* indices)
+    const int* pos_indices)
 {
     // get triangle position indices
-    unsigned int v0_idx = indices[3 * child.object_id + 0].x;
-    unsigned int v1_idx = indices[3 * child.object_id + 1].x;
-    unsigned int v2_idx = indices[3 * child.object_id + 2].x;
+    int v0_idx = pos_indices[3 * child.object_id + 0];
+    int v1_idx = pos_indices[3 * child.object_id + 1];
+    int v2_idx = pos_indices[3 * child.object_id + 2];
 
     // get triangle positions
     float3 v0 = positions[v0_idx];
@@ -83,7 +83,8 @@ __forceinline__ __device__ float3 get_hit(
 __forceinline__ __device__ hit traverse(
     const float3* positions,
     const float3* normals,
-    const uint2* indices,
+    const int* pos_indices,
+    const int* nor_indices,
     const bvh_node* nodes,
     float3 origin,
     float3 direction,
@@ -117,7 +118,7 @@ __forceinline__ __device__ hit traverse(
 
         // query overlaps a leaf node => report collision
         if (hit_l && child_l.is_leaf()) {
-            float3 hit = get_hit(child_l, origin, direction, positions, indices);
+            float3 hit = get_hit(child_l, origin, direction, positions, pos_indices);
             if (hit.x > tmin && hit.x < closest.x) {
                 closest   = hit;
                 object_id = child_l.object_id;
@@ -125,7 +126,7 @@ __forceinline__ __device__ hit traverse(
         }
 
         if (hit_r && child_r.is_leaf()) {
-            float3 hit = get_hit(child_r, origin, direction, positions, indices);
+            float3 hit = get_hit(child_r, origin, direction, positions, pos_indices);
             if (hit.x > tmin && hit.x < closest.x) {
                 closest   = hit;
                 object_id = child_r.object_id;
@@ -152,9 +153,9 @@ __forceinline__ __device__ hit traverse(
         h.hit      = true;
 
         // get triangle normal indices
-        unsigned int v0_idx = indices[3 * object_id + 0].y;
-        unsigned int v1_idx = indices[3 * object_id + 1].y;
-        unsigned int v2_idx = indices[3 * object_id + 2].y;
+        int v0_idx = nor_indices[3 * object_id + 0];
+        int v1_idx = nor_indices[3 * object_id + 1];
+        int v2_idx = nor_indices[3 * object_id + 2];
 
         // get triangle normals
         float3 n0 = normals[v0_idx];
@@ -182,7 +183,8 @@ __forceinline__ __device__ float3 generate_pixel(
     camera* camera,
     const float3* positions,
     const float3* normals,
-    const uint2* indices,
+    const int* pos_indices,
+    const int* nor_indices,
     const bvh_node* bvh_root)
 {
     // initialize random based on sample index and image index
@@ -203,7 +205,15 @@ __forceinline__ __device__ float3 generate_pixel(
     // or the ray does not intersect with the sdf
     for (int i = 0; i < MAX_BOUNCE_COUNT; i++) {
         hit h = traverse(
-            positions, normals, indices, bvh_root, ray_origin, ray_direction, 1e-4f, 1e16f);
+            positions,
+            normals,
+            pos_indices,
+            nor_indices,
+            bvh_root,
+            ray_origin,
+            ray_direction,
+            1e-4f,
+            1e16f);
 
         if (!h.hit) {
             // 'sky' color
@@ -251,7 +261,8 @@ __global__ void generate_pixel_regeneration(
     unsigned long long int* idx,
     const float3* positions,
     const float3* normals,
-    const uint2* indices,
+    const int* pos_indices,
+    const int* nor_indices,
     const bvh_node* bvh_root)
 {
     const ulong max_count = size_x * size_y * sample_count;
@@ -276,7 +287,8 @@ __global__ void generate_pixel_regeneration(
             camera,
             positions,
             normals,
-            indices,
+            pos_indices,
+            nor_indices,
             bvh_root);
 
         // atomically add to buffer
@@ -347,7 +359,8 @@ bool generate(
         d_idx.get_ptr(),
         bvh.positions.get_ptr(),
         bvh.normals.get_ptr(),
-        bvh.indices.get_ptr(),
+        bvh.pos_indices.get_ptr(),
+        bvh.nor_indices.get_ptr(),
         bvh.nodes.get_ptr());
     RETURN_IF_CUDA_ERR(cudaGetLastError());
 
