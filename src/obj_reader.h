@@ -24,12 +24,14 @@
 
 #include <sutil/vec_math.h>
 
+#include <vector>
+
 struct scene {
-    buf_cpu<float3> positions;
-    buf_cpu<float3> normals;
+    std::vector<float3> positions;
+    std::vector<float3> normals;
     /// Three consecutive indices define the three points of a triangle.
     /// The two indices are the vertex position and normal.
-    buf_cpu<uint2> indices;
+    std::vector<uint2> indices;
     float3 soffset; // Scene offset.
     float3 sextent; // Scene extent.
 };

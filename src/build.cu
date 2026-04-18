@@ -314,7 +314,7 @@ __global__ void set_aabb(
 
 bool build(const scene& s, bvh& bvh)
 {
-    const int num_triangles = s.indices.get_num_elements() / 3;
+    const int num_triangles = s.indices.size() / 3;
     // must have at least two triangles. we cannot build a bvh for zero
     // triangles, and a bvh of one triangle has no internal nodes
     // which requires special handling which we forgo
@@ -357,23 +357,23 @@ bool build(const scene& s, bvh& bvh)
     RETURN_IF_FALSE(d_tmp.resize(num_tmp_bytes));
 
     // copy scene to device
-    RETURN_IF_FALSE(bvh.positions.resize(s.positions.get_num_elements()));
+    RETURN_IF_FALSE(bvh.positions.resize(s.positions.size()));
     RETURN_IF_CUDA_ERR(cudaMemcpy(
         bvh.positions.get_ptr(),
-        s.positions.get_ptr(),
-        sizeof(float3) * s.positions.get_num_elements(),
+        s.positions.data(),
+        sizeof(float3) * s.positions.size(),
         cudaMemcpyHostToDevice));
-    RETURN_IF_FALSE(bvh.normals.resize(s.normals.get_num_elements()));
+    RETURN_IF_FALSE(bvh.normals.resize(s.normals.size()));
     RETURN_IF_CUDA_ERR(cudaMemcpy(
         bvh.normals.get_ptr(),
-        s.normals.get_ptr(),
-        sizeof(float3) * s.normals.get_num_elements(),
+        s.normals.data(),
+        sizeof(float3) * s.normals.size(),
         cudaMemcpyHostToDevice));
-    RETURN_IF_FALSE(bvh.indices.resize(s.indices.get_num_elements()));
+    RETURN_IF_FALSE(bvh.indices.resize(s.indices.size()));
     RETURN_IF_CUDA_ERR(cudaMemcpy(
         bvh.indices.get_ptr(),
-        s.indices.get_ptr(),
-        sizeof(uint2) * s.indices.get_num_elements(),
+        s.indices.data(),
+        sizeof(uint2) * s.indices.size(),
         cudaMemcpyHostToDevice));
 
     // allocate BVH (n leaf nodes, n - 1 internal nodes)
