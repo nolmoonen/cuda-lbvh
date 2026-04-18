@@ -30,12 +30,10 @@ struct hit {
 };
 
 struct bvh_node {
-    // If `nullptr`, then this node is a leaf.
-    bvh_node* child_a;
-    // May be nullptr for inner node if the total number of
-    // nodes is not a power of two.
-    bvh_node* child_b;
-    bvh_node* parent;
+    // If `-1`, then this node is a leaf.
+    int child_l;
+    int child_r;
+    int paren;
     /** Bounding box. */
     float3 min;
     float3 max;
@@ -50,16 +48,13 @@ struct bvh_node {
         unsigned int visited;
     };
 
-    __forceinline__ __device__ bool is_leaf() const { return child_a == nullptr; }
+    __forceinline__ __device__ bool is_leaf() const { return child_l == -1; }
 };
 
 struct bvh {
-    const bvh_node* get_root() const { return internal_nodes.get_ptr(); }
-
-    // Leaf nodes, one for every photon data element.
-    buf_gpu<bvh_node> leaf_nodes;
-    // Internal nodes, amount equal to #leaf nodes - 1.
-    buf_gpu<bvh_node> internal_nodes;
+    // First N - 1 internal nodes.
+    // Followed by N leaf nodes, one for every triangle.
+    buf_gpu<bvh_node> nodes;
     // See `scene`.
     buf_gpu<float3> positions;
     buf_gpu<float3> normals;

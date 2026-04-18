@@ -26,6 +26,10 @@
 #include <cub/device/device_radix_sort.cuh>
 #include <sutil/vec_math.h>
 
+__device__ int get_leaf_node_idx(int i, int num_triangles) { return num_triangles - 1 + i; }
+
+__device__ int get_internal_node_idx(int i) { return i; }
+
 /// Expands a 10-bit integer into 30 bits by inserting 2 zeros after each bit.
 __forceinline__ __device__ unsigned int expand_bits(unsigned int v)
 {
@@ -84,37 +88,37 @@ __global__ void assign_morton(
 
 // todo this kernel is pretty small, can it be combined with another?
 __global__ void leaf_nodes(
-    unsigned int* sorted_object_ids,
-    unsigned int num_objects,
-    bvh_node* leaf_nodes,
-    bvh_node* internal_nodes)
+    unsigned int* sorted_object_ids, unsigned int num_objects, bvh_node* nodes)
 {
     const unsigned int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (thread_id >= num_objects) return;
 
+    bvh_node* internal_nodes = nodes;
+    bvh_node* leaf_nodes     = nodes + num_objects - 1;
+
     // no need to set parent to nullptr, each child will have a parent
     leaf_nodes[thread_id].object_id = sorted_object_ids[thread_id];
     // needed to recognize that this node is a leaf
-    leaf_nodes[thread_id].child_a = nullptr;
+    leaf_nodes[thread_id].child_l = -1;
 
-    // need to set for internal node parent to nullptr, for testing later
-    // there is one less internal node than leaf node, test for that
+    // Need to set for internal node parent to nullptr, to detect the root node.
+    // There is one less internal node than leaf node, test for that.
     if (thread_id >= num_objects - 1) return;
-    internal_nodes[thread_id].parent = nullptr;
+    internal_nodes[thread_id].paren = -1;
 }
 
-__forceinline__ __device__ int delta(int a, int b, unsigned int n, unsigned int* c, unsigned int ka)
+__forceinline__ __device__ int delta(int l, int r, unsigned int n, unsigned int* c, unsigned int kl)
 {
     // this guard is for leaf nodes, not internal nodes (hence [0, n-1])
-    if (b < 0 || b > n - 1) return -1;
-    unsigned int kb = c[b];
-    if (ka == kb) {
+    if (r < 0 || r > n - 1) return -1;
+    unsigned int kr = c[r];
+    if (kl == kr) {
         // if keys are equal, use id as fallback
         // (+32 because they have the same morton code)
-        return 32 + __clz((unsigned int)a ^ (unsigned int)b);
+        return 32 + __clz(static_cast<unsigned int>(l) ^ static_cast<unsigned int>(r));
     }
     // clz = count leading zeros
-    return __clz(ka ^ kb);
+    return __clz(kl ^ kr);
 }
 
 __forceinline__ __device__ int2
@@ -193,12 +197,13 @@ __global__ void internal_nodes(
     unsigned int* sorted_morton_codes,
     unsigned int* sorted_object_ids,
     unsigned int num_objects,
-    bvh_node* d_leaf_nodes,
-    bvh_node* d_internal_nodes)
+    bvh_node* nodes)
 {
     const unsigned int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
     // N.B., we want i in range [0, num_objects - 1) since every thread sets one internal node.
     if (thread_id >= num_objects - 1) return;
+
+    bvh_node* internal_nodes = nodes;
 
     // find out which range of objects the node corresponds to
     const int2 range = determine_range(sorted_morton_codes, num_objects, thread_id);
@@ -206,28 +211,28 @@ __global__ void internal_nodes(
     // determine where to split the range
     const int split = find_split(sorted_morton_codes, range.x, range.y, num_objects);
 
-    // select child a
-    bvh_node* child_a;
+    // select left child
+    int child_l;
     if (split == range.x) {
-        child_a = &d_leaf_nodes[split];
+        child_l = get_leaf_node_idx(split, num_objects);
     } else {
-        child_a = &d_internal_nodes[split];
+        child_l = get_internal_node_idx(split);
     }
 
-    // select child b
-    bvh_node* child_b;
+    // select right child
+    int child_r;
     if (split + 1 == range.y) {
-        child_b = &d_leaf_nodes[split + 1];
+        child_r = get_leaf_node_idx(split + 1, num_objects);
     } else {
-        child_b = &d_internal_nodes[split + 1];
+        child_r = get_internal_node_idx(split + 1);
     }
 
     // record parent-child relationships
-    d_internal_nodes[thread_id].child_a = child_a;
-    d_internal_nodes[thread_id].child_b = child_b;
-    d_internal_nodes[thread_id].visited = 0;
-    child_a->parent                     = &d_internal_nodes[thread_id];
-    child_b->parent                     = &d_internal_nodes[thread_id];
+    internal_nodes[thread_id].child_l = child_l;
+    internal_nodes[thread_id].child_r = child_r;
+    internal_nodes[thread_id].visited = 0;
+    nodes[child_l].paren              = get_internal_node_idx(thread_id);
+    nodes[child_r].paren              = get_internal_node_idx(thread_id);
 }
 
 // Load float3 at global level (cache in L2 and below, not L1).
@@ -246,16 +251,14 @@ __device__ void __stcg(float3* p, const float3& q)
 
 // Set internal node bounding boxes by traversing the tree from the leaf nodes.
 __global__ void set_aabb(
-    unsigned int num_objects,
-    bvh_node* d_leaf_nodes,
-    bvh_node* d_internal_nodes,
-    const float3* positions,
-    const uint2* indices)
+    unsigned int num_objects, bvh_node* nodes, const float3* positions, const uint2* indices)
 {
     const unsigned int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (thread_id >= num_objects) return;
 
-    const unsigned int object_id = d_leaf_nodes[thread_id].object_id;
+    bvh_node* leaf_nodes = nodes + num_objects - 1;
+
+    const unsigned int object_id = leaf_nodes[thread_id].object_id;
 
     unsigned int idx_u = indices[3 * object_id + 0].x;
     unsigned int idx_v = indices[3 * object_id + 1].x;
@@ -272,22 +275,24 @@ __global__ void set_aabb(
     // Bounding boxes must be loaded and stored without caching in L1,
     // as they may be loaded and stored by threads not on the same SM.
 
-    __stcg(&(d_leaf_nodes[thread_id].min), min);
-    __stcg(&(d_leaf_nodes[thread_id].max), max);
+    __stcg(&(leaf_nodes[thread_id].min), min);
+    __stcg(&(leaf_nodes[thread_id].max), max);
 
-    // Recursively set tree bounding boxes, `current_node` is always an
+    // Recursively set tree bounding boxes, `curr_node` is always an
     // internal node (since it is parent of another).
-    bvh_node* current_node = d_leaf_nodes[thread_id].parent;
+    int curr_node_idx = leaf_nodes[thread_id].paren;
     while (true) {
         // Memory fences must be used to lock-step setting the bounding
         // boxes and marking nodes as visited.
         __threadfence();
 
         // We have reached the parent of the root node: terminate.
-        if (current_node == nullptr) break;
+        if (curr_node_idx == -1) break;
+
+        bvh_node& curr_node = nodes[curr_node_idx];
 
         // We have reached an inner node: check whether the node was visited.
-        unsigned int visited = atomicAdd(&current_node->visited, 1);
+        unsigned int visited = atomicAdd(&(curr_node.visited), 1);
         assert(visited == 0 || visited == 1);
 
         // This is the first thread entering: terminate
@@ -298,17 +303,20 @@ __global__ void set_aabb(
         // This is the second thread entering, we know that our sibling has reached
         // the current node and terminated, and hence the sibling bounding box is correct.
 
-        // Set running bounding box to be the union of bounding boxes.
-        const float3 a_min = __ldcg(&(current_node->child_a->min));
-        const float3 a_max = __ldcg(&(current_node->child_a->max));
-        const float3 b_min = __ldcg(&(current_node->child_b->min));
-        const float3 b_max = __ldcg(&(current_node->child_b->max));
+        const bvh_node& child_l = nodes[curr_node.child_l];
+        const bvh_node& child_r = nodes[curr_node.child_r];
 
-        __stcg(&(current_node->min), fminf(a_min, b_min));
-        __stcg(&(current_node->max), fmaxf(a_max, b_max));
+        // Set running bounding box to be the union of bounding boxes.
+        const float3 a_min = __ldcg(&(child_l.min));
+        const float3 a_max = __ldcg(&(child_l.max));
+        const float3 b_min = __ldcg(&(child_r.min));
+        const float3 b_max = __ldcg(&(child_r.max));
+
+        __stcg(&(curr_node.min), fminf(a_min, b_min));
+        __stcg(&(curr_node.max), fmaxf(a_max, b_max));
 
         // Continue traversal.
-        current_node = current_node->parent;
+        curr_node_idx = curr_node.paren;
     }
 }
 
@@ -376,9 +384,8 @@ bool build(const scene& s, bvh& bvh)
         sizeof(uint2) * s.indices.size(),
         cudaMemcpyHostToDevice));
 
-    // allocate BVH (n leaf nodes, n - 1 internal nodes)
-    RETURN_IF_FALSE(bvh.leaf_nodes.resize(num_triangles));
-    RETURN_IF_FALSE(bvh.internal_nodes.resize(num_triangles - 1));
+    // allocate BVH (n - 1 internal nodes, n leaf nodes)
+    RETURN_IF_FALSE(bvh.nodes.resize(num_triangles - 1 + num_triangles));
 
     // events for measuring elapsed time
     cudaEvent_t start, stop;
@@ -405,28 +412,17 @@ bool build(const scene& s, bvh& bvh)
 
     // construct leaf nodes
     leaf_nodes<<<num_blocks, block_size>>>(
-        d_ids_sorted.get_ptr(),
-        num_triangles,
-        bvh.leaf_nodes.get_ptr(),
-        bvh.internal_nodes.get_ptr());
+        d_ids_sorted.get_ptr(), num_triangles, bvh.nodes.get_ptr());
     RETURN_IF_CUDA_ERR(cudaGetLastError());
 
     // construct internal nodes
     internal_nodes<<<num_blocks, block_size>>>(
-        d_morton_sorted.get_ptr(),
-        d_ids_sorted.get_ptr(),
-        num_triangles,
-        bvh.leaf_nodes.get_ptr(),
-        bvh.internal_nodes.get_ptr());
+        d_morton_sorted.get_ptr(), d_ids_sorted.get_ptr(), num_triangles, bvh.nodes.get_ptr());
     RETURN_IF_CUDA_ERR(cudaGetLastError());
 
     // calculate bounding boxes by walking the hierarchy toward the root
     set_aabb<<<num_blocks, block_size>>>(
-        num_triangles,
-        bvh.leaf_nodes.get_ptr(),
-        bvh.internal_nodes.get_ptr(),
-        bvh.positions.get_ptr(),
-        bvh.indices.get_ptr());
+        num_triangles, bvh.nodes.get_ptr(), bvh.positions.get_ptr(), bvh.indices.get_ptr());
     RETURN_IF_CUDA_ERR(cudaGetLastError());
 
     // print elapsed time

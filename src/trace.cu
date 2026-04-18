@@ -32,10 +32,10 @@
 /// Returns true if the ray intersects with the bounding box.
 /// Ray Tracing Gems 2, Chapter 2: Ray Axis-Aligned Bounding Box Intersection
 __forceinline__ __device__ bool hit_aabb(
-    bvh_node* child, const float3& origin, const float3& inv_dir, float length)
+    const bvh_node& child, const float3& origin, const float3& inv_dir, float length)
 {
-    float3 t_lower = (child->min - origin) * inv_dir;
-    float3 t_upper = (child->max - origin) * inv_dir;
+    float3 t_lower = (child.min - origin) * inv_dir;
+    float3 t_upper = (child.max - origin) * inv_dir;
 
     float3 tmin = fminf(t_lower, t_upper);
     float3 tmax = fmaxf(t_lower, t_upper);
@@ -47,12 +47,16 @@ __forceinline__ __device__ bool hit_aabb(
 /// Returns the length along the ray as well as the barycentric coords (u, v).
 /// https://www.iquilezles.org/www/articles/intersectors/intersectors.htm
 __forceinline__ __device__ float3 get_hit(
-    bvh_node* child, float3 origin, float3 direction, const float3* positions, const uint2* indices)
+    const bvh_node& child,
+    float3 origin,
+    float3 direction,
+    const float3* positions,
+    const uint2* indices)
 {
     // get triangle position indices
-    unsigned int v0_idx = indices[3 * child->object_id + 0].x;
-    unsigned int v1_idx = indices[3 * child->object_id + 1].x;
-    unsigned int v2_idx = indices[3 * child->object_id + 2].x;
+    unsigned int v0_idx = indices[3 * child.object_id + 0].x;
+    unsigned int v1_idx = indices[3 * child.object_id + 1].x;
+    unsigned int v2_idx = indices[3 * child.object_id + 2].x;
 
     // get triangle positions
     float3 v0 = positions[v0_idx];
@@ -80,7 +84,7 @@ __forceinline__ __device__ hit traverse(
     const float3* positions,
     const float3* normals,
     const uint2* indices,
-    const bvh_node* bvh_root,
+    const bvh_node* nodes,
     float3 origin,
     float3 direction,
     float tmin,
@@ -90,10 +94,10 @@ __forceinline__ __device__ hit traverse(
     float3 inv_dir = 1.f / direction;
 
     // allocate traversal stack from thread-local memory,
-    // and push NULL to indicate that there are no postponed nodes
-    bvh_node* stack[64];
-    bvh_node** stack_ptr = stack;
-    *stack_ptr++         = NULL;
+    // and push 0 to indicate that there are no postponed nodes
+    int stack[64];
+    int* stack_ptr = stack;
+    *stack_ptr++   = 0;
 
     // closest hit, u and v
     float3 closest = make_float3(tmax, 0.f, 0.f);
@@ -101,44 +105,46 @@ __forceinline__ __device__ hit traverse(
     unsigned int object_id;
 
     // traverse nodes starting from the root, which is the first internal node
-    const bvh_node* curr = bvh_root;
+    int curr = 0;
     do {
         // check each child node for overlap.
-        bvh_node* child_l = curr->child_a;
-        bvh_node* child_r = curr->child_b;
-        bool hit_l        = hit_aabb(child_l, origin, inv_dir, tmax);
-        bool hit_r        = hit_aabb(child_r, origin, inv_dir, tmax);
+        int child_l_idx         = nodes[curr].child_l;
+        int child_r_idx         = nodes[curr].child_r;
+        const bvh_node& child_l = nodes[child_l_idx];
+        const bvh_node& child_r = nodes[child_r_idx];
+        bool hit_l              = hit_aabb(child_l, origin, inv_dir, tmax);
+        bool hit_r              = hit_aabb(child_r, origin, inv_dir, tmax);
 
         // query overlaps a leaf node => report collision
-        if (hit_l && child_l->is_leaf()) {
+        if (hit_l && child_l.is_leaf()) {
             float3 hit = get_hit(child_l, origin, direction, positions, indices);
             if (hit.x > tmin && hit.x < closest.x) {
                 closest   = hit;
-                object_id = child_l->object_id;
+                object_id = child_l.object_id;
             }
         }
 
-        if (hit_r && child_r->is_leaf()) {
+        if (hit_r && child_r.is_leaf()) {
             float3 hit = get_hit(child_r, origin, direction, positions, indices);
             if (hit.x > tmin && hit.x < closest.x) {
                 closest   = hit;
-                object_id = child_r->object_id;
+                object_id = child_r.object_id;
             }
         }
 
         // query overlaps an internal node => traverse
-        bool traverse_l = (hit_l && !child_l->is_leaf());
-        bool traverse_r = (hit_r && !child_r->is_leaf());
+        bool traverse_l = (hit_l && !child_l.is_leaf());
+        bool traverse_r = (hit_r && !child_r.is_leaf());
 
         if (!traverse_l && !traverse_r) {
             curr = *--stack_ptr; // pop
         } else {
-            curr = (traverse_l) ? child_l : child_r;
+            curr = (traverse_l) ? child_l_idx : child_r_idx;
             if (traverse_l && traverse_r) {
-                *stack_ptr++ = child_r; // push
+                *stack_ptr++ = child_r_idx; // push
             }
         }
-    } while (curr != NULL);
+    } while (curr != 0);
 
     hit h;
     if (closest.x < tmax) {
@@ -342,7 +348,7 @@ bool generate(
         bvh.positions.get_ptr(),
         bvh.normals.get_ptr(),
         bvh.indices.get_ptr(),
-        bvh.get_root());
+        bvh.nodes.get_ptr());
     RETURN_IF_CUDA_ERR(cudaGetLastError());
 
     // print elapsed time
