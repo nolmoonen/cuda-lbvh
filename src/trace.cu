@@ -283,7 +283,9 @@ __global__ void generate_pixel_regeneration(
 /// Converts a linear radiance value to a sRGB pixel value.
 uchar radiance_to_srgb(float val)
 {
-    return (uchar)(clamp(powf(val, 1.f / 2.4f), 0.f, 1.f) * 255.f);
+    // https://en.wikipedia.org/wiki/SRGB#Transfer_function_(%22gamma%22)
+    const float r = val > .0031308f ? 1.055f * powf(val, 1.f / 2.4f) - .055f : 12.92f * val;
+    return roundf(clamp(255.f * r, 0.f, 255.f));
 }
 
 bool generate(
